@@ -32,6 +32,19 @@ window.__ModuleLoader__.load({
       notConfigured: '当前页面拿不到安装入口，请在「发现」页安装。',
       hint: '安装后如未生效，重启 DSH。',
       confirm: '安装',
+      publish: '发布',
+      publishTitle: '发布本机插件到市场',
+      server: '市场地址',
+      user: '用户名',
+      password: '密码',
+      login: '登录',
+      logout: '退出登录',
+      pickPlugin: '选择要发布的插件',
+      category: '分类',
+      publishNow: '提交发布',
+      publishing: '上传中…',
+      cancel: '取消',
+      noInstalled: '本机没有可发布的插件（只列出可读到源码目录的已装组合包）',
     };
     const en = {
       tab: 'Market',
@@ -97,6 +110,14 @@ window.__ModuleLoader__.load({
 .mk .setup{max-width:520px;display:flex;flex-direction:column;gap:10px;padding:18px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
 .mk .setup input{width:100%}
 .mk .empty{text-align:center;padding:50px 20px;color:var(--dsw-alias-label-secondary)}
+.mk .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:50;padding:20px}
+.mk .sheet{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;width:min(560px,100%);max-height:86vh;overflow:auto;padding:0 0 4px}
+.mk .sheetHead{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.mk .sheetHead h3{margin:0;font-size:14px}
+.mk .stack{display:flex;flex-direction:column;gap:10px;padding:16px}
+.mk .stack label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.mk .sheetFoot{display:flex;justify-content:flex-end;gap:8px;padding-top:6px}
+.mk .who{font-size:12px;color:var(--dsw-alias-label-secondary)}
 @media(max-width:720px){.mk{padding:14px}.mk .grid{grid-template-columns:1fr}}
 `;
 
@@ -132,6 +153,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState('');
       const [note, setNote] = React.useState('');
       const [installed, setInstalled] = React.useState(readInstalled);
+      const [publish, setPublish] = React.useState(false);
       const alive = React.useRef(true);
 
       async function load(url) {
@@ -224,6 +246,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'sub' }, (data?.description?.zh || t('subtitle')) + ' · ' + server)),
           h('div', { className: 'actions' },
             h('button', { onClick: () => load(server), disabled: loading }, loading ? '…' : t('refresh')),
+            h('button', { className: 'primary', onClick: () => setPublish(true) }, t('publish')),
             h('button', { onClick: () => { setServer(''); setDraft(''); } }, t('change')),
           )),
 
@@ -280,7 +303,106 @@ window.__ModuleLoader__.load({
               }, busy === p.name ? t('installing') : (isInstalled ? t('installed') : t('install')))),
           );
         })),
+        publish ? h(PublishOverlay, {
+          t,
+          server,
+          categories: data?.metadata?.categories || {},
+          onClose: () => setPublish(false),
+          onDone: (msg) => { setNote(msg); setPublish(false); load(server); },
+        }) : null,
       );
+    }
+
+
+    function PublishOverlay(props) {
+      const t = props.t;
+      const [session, setSession] = React.useState(null);
+      const [busy, setBusy] = React.useState('');
+      const [error, setError] = React.useState('');
+      const [list, setList] = React.useState([]);
+      const [name, setName] = React.useState('');
+      const [category, setCategory] = React.useState('general');
+      const [form, setForm] = React.useState({ server: props.server || localStorage.getItem(SERVER_KEY) || '', name: '', password: '' });
+
+      const call = async (path, body) => {
+        const res = await fetch(path, body === undefined
+          ? { credentials: 'same-origin' }
+          : { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        return data;
+      };
+
+      React.useEffect(() => {
+        call('/api/dsh-market?op=session').then((s) => {
+          setSession(s);
+          if (s.loggedIn) loadInstalled();
+        }).catch((e) => setError(String(e.message || e)));
+      }, []);
+
+      async function loadInstalled() {
+        setBusy('list');
+        try {
+          const out = await call('/api/dsh-market?op=installed');
+          const usable = (out.installed || []).filter((x) => x.dir);
+          setList(usable);
+          if (usable.length) setName(usable[0].name);
+        } catch (e) { setError(String(e.message || e)); }
+        finally { setBusy(''); }
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        setBusy('login'); setError('');
+        try {
+          const out = await call('/api/dsh-market', { action: 'login', server: form.server, name: form.name, password: form.password });
+          setSession({ loggedIn: true, user: out.user, server: out.server });
+          setForm({ ...form, password: '' });
+          await loadInstalled();
+        } catch (e) { setError(String(e.message || e)); }
+        finally { setBusy(''); }
+      }
+
+      async function publish() {
+        setBusy('publish'); setError('');
+        try {
+          const out = await call('/api/dsh-market', { action: 'publish', name, category });
+          props.onDone(`已提交 ${out.published.name}@${out.published.version}，等待审核`);
+        } catch (e) { setError(String(e.message || e)); }
+        finally { setBusy(''); }
+      }
+
+      const cats = props.categories || {};
+      return h('div', { className: 'overlay' },
+        h('div', { className: 'sheet' },
+          h('div', { className: 'sheetHead' },
+            h('h3', null, t('publishTitle')),
+            h('button', { onClick: props.onClose }, '✕')),
+
+          error ? h('div', { className: 'notice bad' }, error) : null,
+
+          !session ? h('div', { className: 'empty' }, '…') : !session.loggedIn
+            ? h('form', { className: 'stack', onSubmit: login },
+              h('label', null, t('server'), h('input', { value: form.server, onChange: (e) => setForm({ ...form, server: e.target.value }) })),
+              h('label', null, t('user'), h('input', { value: form.name, autoComplete: 'username', onChange: (e) => setForm({ ...form, name: e.target.value }) })),
+              h('label', null, t('password'), h('input', { type: 'password', value: form.password, autoComplete: 'current-password', onChange: (e) => setForm({ ...form, password: e.target.value }) })),
+              h('button', { className: 'primary', disabled: busy === 'login' }, busy === 'login' ? '…' : t('login')))
+            : h('div', { className: 'stack' },
+              h('div', { className: 'who' }, session.user + ' @ ' + (session.server || '')),
+              busy === 'list' ? h('div', { className: 'empty' }, '…') : null,
+              !busy && !list.length ? h('div', { className: 'notice' }, t('noInstalled')) : null,
+              list.length ? h('label', null, t('pickPlugin'),
+                h('select', { value: name, onChange: (e) => setName(e.target.value) },
+                  list.map((x) => h('option', { key: x.name, value: x.name }, `${x.title || x.name} · ${x.name}${x.version ? '@' + x.version : ''}${x.linked ? '（link）' : ''}`)))) : null,
+              list.length ? h('label', null, t('category'),
+                h('select', { value: category, onChange: (e) => setCategory(e.target.value) },
+                  Object.keys(cats).length
+                    ? Object.keys(cats).map((id) => h('option', { key: id, value: id }, cats[id]?.title?.zh || cats[id]?.title?.en || id))
+                    : h('option', { value: 'general' }, '通用插件'))) : null,
+              h('div', { className: 'sheetFoot' },
+                h('button', { onClick: props.onClose }, t('cancel')),
+                h('button', { className: 'primary', disabled: !list.length || busy === 'publish', onClick: publish }, busy === 'publish' ? t('publishing') : t('publishNow')))),
+        ));
     }
 
     return {

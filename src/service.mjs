@@ -6,6 +6,24 @@ import { q, now, uid, audit } from './db.mjs';
 import { inspectTarball } from './manifest.mjs';
 import { canCreateCategory, isAdmin } from './auth.mjs';
 import { parseMarketIndex } from '../vendor/dsh-plugin-market-index.mjs';
+import { sourceEntries } from './sources.mjs';
+
+let indexVersion = 1;
+/** 索引数据发生变化时调用，动态接口据此失效缓存 */
+export function bumpIndex() { indexVersion += 1; }
+export function getIndexVersion() { return indexVersion; }
+
+/**
+ * 数据签名：跨进程也能感知变化（CLI 上架、另一个实例改数据）。
+ * 索引缓存用它当 key，避免"进程内计数器"只对本进程有效。
+ */
+export function dataSignature() {
+  const rel = q.get("SELECT COUNT(*) AS c, COALESCE(MAX(published_at), '') AS m FROM releases WHERE status = 'published'");
+  const plg = q.get('SELECT COUNT(*) AS c FROM plugins');
+  const cat = q.get("SELECT COUNT(*) AS c, COALESCE(SUM(sort), 0) AS s FROM categories WHERE status = 'active'");
+  const lab = q.get('SELECT COUNT(*) AS c FROM plugin_labels');
+  return `${rel.c}:${rel.m}:${plg.c}:${cat.c}:${cat.s}:${lab.c}`;
+}
 
 const MIME = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 const slug = (name) => name.replace(/^@/, '').replaceAll('/', '__');
@@ -73,6 +91,7 @@ export function archiveCategory(actor, id) {
     q.exec('ROLLBACK');
     throw e;
   }
+  bumpIndex();
   audit(actor.id, 'category.archive', id, { moved: moved.map((m) => m.name) });
   return { archived: id, moved: moved.length, movedPlugins: moved.map((m) => m.name) };
 }
@@ -161,6 +180,7 @@ export function setPluginLabels(actor, name, labelIds) {
   }
   q.run('DELETE FROM plugin_labels WHERE plugin_id = ?', plugin.id);
   for (const id of labelIds) q.run('INSERT OR IGNORE INTO plugin_labels (plugin_id, label_id) VALUES (?,?)', plugin.id, id);
+  bumpIndex();
   audit(actor.id, 'plugin.label', name, { labels: labelIds });
 }
 
@@ -177,14 +197,16 @@ export function updatePlugin(actor, name, patch) {
     assertCategoryUsable(cat, actor);
     q.run('UPDATE plugins SET category_id = ? WHERE id = ?', patch.category, plugin.id);
     audit(actor.id, 'plugin.recategorize', name, { from: plugin.category_id, to: patch.category });
+    bumpIndex();
   }
   if (Array.isArray(patch.labels)) setPluginLabels(actor, name, patch.labels);
 
   try {
-    rebuildIndex();
+    assertIndexValid();
   } catch (e) {
-    throw httpError(500, `索引生成失败：${e.message}`);
+    throw httpError(500, `索引校验失败：${e.message}`);
   }
+  void rebuildIndex();
   return getPlugin(name);
 }
 
@@ -217,12 +239,14 @@ export function approveRelease(actor, id) {
   if (!rel) throw httpError(404, '版本不存在');
   if (rel.status !== 'pending') throw httpError(400, `当前状态 ${rel.status}，不能上架`);
   q.run("UPDATE releases SET status = 'published', published_at = ?, reviewed_by = ? WHERE id = ?", now(), actor.id, id);
+  bumpIndex();
   try {
-    rebuildIndex();
+    assertIndexValid();
   } catch (e) {
     q.run("UPDATE releases SET status = 'pending', published_at = NULL, reviewed_by = NULL WHERE id = ?", id);
-    throw httpError(500, `索引生成失败，已回滚上架：${e.message}`);
+    throw httpError(500, `索引校验失败，已回滚上架：${e.message}`);
   }
+  void rebuildIndex();
   audit(actor.id, 'release.approve', id, { version: rel.version });
   return { id, status: 'published' };
 }
@@ -243,12 +267,14 @@ export function yankRelease(actor, id) {
   if (!rel) throw httpError(404, '版本不存在');
   if (rel.status !== 'published') throw httpError(400, `当前状态 ${rel.status}，不能下架`);
   q.run("UPDATE releases SET status = 'yanked', yanked_at = ? WHERE id = ?", now(), id);
+  bumpIndex();
   try {
-    rebuildIndex();
+    assertIndexValid();
   } catch (e) {
     q.run("UPDATE releases SET status = 'published', yanked_at = NULL WHERE id = ?", id);
-    throw httpError(500, `索引生成失败，已回滚下架：${e.message}`);
+    throw httpError(500, `索引校验失败，已回滚下架：${e.message}`);
   }
+  void rebuildIndex();
   audit(actor.id, 'release.yank', id, {});
   rebuildIndex();
   return { id, status: 'yanked' };
@@ -311,13 +337,29 @@ export function buildIndexModel() {
     plugins.push(item);
   }
 
+  // 透传外部源：同名插件以本市场为准；外部条目去掉分类（分类 id 未在本索引声明会被整份拒绝）
+  const localNames = new Set(plugins.map((p) => p.name));
+  for (const ext of sourceEntries()) {
+    if (localNames.has(ext.name)) continue;
+    const copy = { ...ext };
+    if (copy.metadata) {
+      copy.metadata = { ...copy.metadata, labels: ['official'], category: undefined, sortKeys: copy.metadata.sortKeys ?? {} };
+      if (copy.metadata.category === undefined) delete copy.metadata.category;
+    }
+    plugins.push(copy);
+    localNames.add(ext.name);
+  }
+
   return {
     format: 1,
     title: { en: 'Team plugins', zh: '团队插件' },
     description: { en: 'Internal DSH bundles approved by the team.', zh: '团队审核通过的 DSH 组合包。' },
     metadata: {
       categories: Object.fromEntries(categories.map((c) => [c.id, { title: { en: c.title_en, zh: c.title_zh } }])),
-      labels: Object.fromEntries(labels.map((l) => [l.id, { title: { en: l.title_en, zh: l.title_zh } }])),
+      labels: Object.fromEntries([
+        ...labels.map((l) => [l.id, { title: { en: l.title_en, zh: l.title_zh } }]),
+        ...(sourceEntries().length ? [['official', { title: { en: 'Official', zh: '官方' } }]] : []),
+      ]),
       sortKeys: {},
     },
     plugins,
@@ -335,16 +377,22 @@ function iconFor(name, iconPath) {
   return `icons/${file}`;
 }
 
-/** 生成并校验索引；校验不通过直接抛错，绝不写出会被 DSH 拒绝的文件。 */
+/** 同步断言：当前数据生成的索引一定能被 DSH 接受（审核/改分类时用） */
+export function assertIndexValid() {
+  parseMarketIndex(buildIndexModel(), `${config.publicBaseUrl}/api/v1/index.json`);
+}
+
+/**
+ * 刷新静态兜底文件（接口现在是动态渲染，这个文件只用于 nginx 直出与排查）。
+ * 用动态 import 避开 index-format → service 的循环依赖。
+ */
 export function rebuildIndex() {
-  const model = buildIndexModel();
-  const url = `${config.publicBaseUrl}/api/v1/index.json`;
-  // 硬断言：用 DSH 自带的校验器过一遍
-  parseMarketIndex(model, url);
-  fs.mkdirSync(config.siteDir, { recursive: true });
-  const out = path.join(config.siteDir, 'index.json');
-  fs.writeFileSync(out, JSON.stringify(model, null, 2) + '\n');
-  return { path: out, plugins: model.plugins.length, url };
+  bumpIndex();
+  // eslint-disable-next-line no-undef
+  return import('./index-format.mjs').then((m) => {
+    const out = m.writeStatic();
+    return { path: path.join(config.siteDir, 'index.json'), plugins: out.plugins, url: `${config.publicBaseUrl}/api/v1/index.json` };
+  });
 }
 
 export function httpError(status, message, detail) {

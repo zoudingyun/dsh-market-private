@@ -26,6 +26,8 @@ export const config = {
     url: env('UPSTREAM_REGISTRY', 'https://registry.npmmirror.com').replace(/\/+$/, ''),
     timeoutMs: Number(env('UPSTREAM_TIMEOUT_MS', 20000)),
   },
+  // 市场是否需要登录才能读索引（供客户端探测；默认关，内网匿名可读）
+  requireAuth: env('MARKET_REQUIRE_AUTH', '0') === '1',
   maxTarballBytes: Number(env('MAX_TARBALL_BYTES', 20 * 1024 * 1024)),
   maxUnpackedBytes: Number(env('MAX_UNPACKED_BYTES', 100 * 1024 * 1024)),
   maxFiles: Number(env('MAX_FILES', 2000)),

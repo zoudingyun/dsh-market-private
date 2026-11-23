@@ -6,6 +6,11 @@ const DEFAULTS = {
   'upstream.enabled': config.upstream.enabled ? '1' : '0',
   'upstream.url': config.upstream.url,
   'upstream.timeoutMs': String(config.upstream.timeoutMs),
+  // 市场自身是否需要登录才能读索引（客户端据此决定是否强制登录）
+  'market.requireAuth': config.requireAuth ? '1' : '0',
+  // 透传外部市场源（官方 catalog 与其它 format 1 索引）
+  'sources.enabled': '0',
+  'sources.urls': 'https://cdn.jsdelivr.net/npm/dsh-plugin-catalog/index.json',
 };
 
 export const SETTING_KEYS = Object.keys(DEFAULTS);
@@ -33,6 +38,11 @@ export function setSettings(actor, patch) {
     const v = String(value);
     if (key === 'upstream.url' && !/^https?:\/\/.+/.test(v)) throw httpError(400, '上游地址必须是 http(s) URL');
     if (key === 'upstream.timeoutMs' && !(Number(v) >= 1000 && Number(v) <= 120000)) throw httpError(400, '超时应在 1000–120000 毫秒之间');
+    if (key === 'sources.urls') {
+      for (const u of v.split(/[\s,]+/).filter(Boolean)) {
+        if (!/^https?:\/\//.test(u)) throw httpError(400, `源地址必须是 http(s)：${u}`);
+      }
+    }
     q.run(`INSERT INTO settings (key, value, updated_by, updated_at) VALUES (?,?,?,?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
       key, v, actor.id, now());

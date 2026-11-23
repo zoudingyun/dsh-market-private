@@ -104,7 +104,11 @@ node src/cli.mjs yank    r_xxxx --as admin      # 下架（索引移除，包保
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/v1/index.json` | 索引（DSH 读这个） |
+| GET | `/api/v1/index.json` | 索引，DSH **format 1**（原生发现页读这个） |
+| GET | `/api/v1/catalog.json` | 同一份数据的 **awesome 形状**，dsh-market 等第三方市场直接消费 |
+| GET | `/api/v1/market/info` | 匿名可读：`requiresAuth`，客户端据此决定是否强制登录 |
+| GET/POST | `/api/v1/sources`、`/api/v1/sources/refresh` | 透传外部源（官方 catalog 等）的状态与刷新 |
+| GET | `/p/:name` | 插件详情页（catalog 里没有仓库地址时作为落地页） |
 | GET | `/api/v1/icons/:file` | 索引里相对图标的落点 |
 | POST | `/api/v1/auth/login` | `{name,password}` → `{token,user}` |
 | GET | `/api/v1/auth/me` | 当前用户 |
@@ -130,6 +134,17 @@ node src/cli.mjs yank    r_xxxx --as admin      # 下架（索引移除，包保
 **索引生成是硬断言**：模型先用 DSH 自带的 `parseMarketIndex` 校验，不通过就不写文件、上架动作回滚。
 
 ---
+
+## 两种 JSON 投影
+
+同一份数据、两个格式，靠请求时的动态渲染产出（带 ETag，未变更返回 304）：
+
+| 格式 | 消费方 | 硬约束 |
+|---|---|---|
+| format 1 | DSH 原生「发现」页、`plugin_market` 工具 | 每条要有 `versions[].source`，任何一条不合规**整份被拒**，所以渲染后用 DSH 自带 `parseMarketIndex` 硬校验 |
+| awesome 形状 | dsh-market（含官方 app） | 每条必须有 `name` + `url`(http) + `category`，缺则**逐条跳过** |
+
+改完数据（上架/下架/改分类）不需要手动重建文件：索引缓存以「进程内版本 + 数据签名 + 外部源时间戳」为 key，CLI 在另一个进程改数据也会被感知。
 
 ## 部署
 
