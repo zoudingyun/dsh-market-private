@@ -269,6 +269,7 @@ export function SettingsCard({ t, locale, onRemoved, sidebar, entries }: Setting
   )
   const [open, setOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const advancedSeeded = useRef(false)
   // Several cards can be mounted at once (settings list, bundle page, the
   // settings tab), so the disclosure's id has to be per instance.
   const advancedId = useId()
@@ -304,6 +305,33 @@ export function SettingsCard({ t, locale, onRemoved, sidebar, entries }: Setting
   const [status, setStatus] = useState<SelfStatus | null>(null)
   /** The plugin catalogs list; null until read, and for a server that predates it. */
   const [catalogs, setCatalogs] = useState<CatalogsData | null>(null)
+  /**
+   * 卡片本身默认收起（上游的取舍：插件配置不常改）。但私有市场的第一件事就是
+   * 「添加目录」，而目录区块在卡片 → 高级 → 插件目录三层折叠里面，等于找不到。
+   * 所以这台机器上还没有任何私有市场时，直接把卡片和「高级」都展开。
+   *
+   * 收起状态下 `catalogs` 不会载入（载入被 `open` 把关），因此这里自己探一次。
+   */
+  useEffect(() => {
+    if (advancedSeeded.current) return
+    if (catalogs !== null) return
+    let live = true
+    void (async () => {
+      try {
+        const response = await fetch(api('/dsh-market/catalogs'), { cache: 'no-store' })
+        const data = readCatalogs(await response.json())
+        if (!live || data === null) return
+        if (data.sources.some((source) => source.kind !== 'public')) {
+          advancedSeeded.current = true
+          return
+        }
+        setOpen(true)
+        setAdvancedOpen(true)
+        advancedSeeded.current = true
+      } catch { /* 老宿主没有这个路由：维持上游的收起状态 */ }
+    })()
+    return () => { live = false }
+  }, [catalogs])
   const [update, setUpdate] = useState<SelfUpdate | null>(null)
   const notificationSnapshot = useUpdateNotifications()
   useEffect(() => {

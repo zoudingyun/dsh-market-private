@@ -13,7 +13,7 @@
  * letting them see an error row they can retry.
  */
 
-import { createElement as h, useEffect, useState } from 'react'
+import { createElement as h, Fragment, useEffect, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import css from './Market.module.css'
 import { api } from './market-data.ts'
@@ -66,11 +66,14 @@ export function MarketAuthGate({ t, children }: { t: Translate; children?: React
 
   useEffect(check, [])
 
-  if (phase.kind === 'open') return h('div', { className: css.gateHost }, children)
-  if (phase.kind === 'checking') return h('div', { className: css.gateHost, 'aria-busy': 'true' })
+  // 这两条分支刻意**不加任何包裹元素**：市场面板的根节点是 `height:100%` +
+  // 内部 `.body{flex:1;overflow-y:auto}`，高度链一旦被一个 auto 高度的 div 截断，
+  // 侧栏页就整块不能滚动（内容被裁掉）。Fragment 不产生 DOM 节点。
+  if (phase.kind === 'open') return h(Fragment, null, children)
+  if (phase.kind === 'checking') return h(Fragment, null, children)
 
   const market = phase.market
-  return h('div', { className: css.gateHost },
+  return h('div', { className: css.gateScreen },
     h('div', { className: css.gateCard },
       h('div', { className: css.gateTitle }, t('gateTitle')),
       h('div', { className: css.gateText },

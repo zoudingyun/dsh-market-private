@@ -71,7 +71,7 @@ async function readJson(req) {
 
 function packument(name) {
   const rows = q.all(
-    `SELECT r.version, r.integrity, r.sha512, r.manifest, r.engines_dsh
+    `SELECT r.version, r.integrity, r.sha512, r.manifest, r.engines_dsh, r.created_at
        FROM releases r JOIN plugins p ON p.id = r.plugin_id
       WHERE p.name = ? AND r.status IN ('pending','published')
       ORDER BY r.created_at`,
@@ -79,6 +79,9 @@ function packument(name) {
   );
   if (!rows.length) return null;
   const versions = {};
+  // 标准 packument 带 time：pnpm 的 minimumReleaseAge（供应链策略）靠它判断
+  // 版本发布了多久，缺了会报 "missing the time field" 并跳过这项检查。
+  const time = {};
   let latest = null;
   for (const r of rows) {
     const info = JSON.parse(r.manifest);
@@ -93,9 +96,12 @@ function packument(name) {
         shasum: crypto.createHash('sha1').update(fs.readFileSync(tarballOf(name, r.version))).digest('hex'),
       },
     };
+    time[r.version] = r.created_at;
     if (!latest || semver.gt(r.version, latest)) latest = r.version;
   }
-  return { name, 'dist-tags': { latest }, versions };
+  time.created = time.created ?? rows[0].created_at;
+  time.modified = rows[rows.length - 1].created_at;
+  return { name, 'dist-tags': { latest }, versions, time, modified: time.modified };
 }
 
 

@@ -1531,7 +1531,7 @@
 .loginForm label{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#6b7280)}
 .loginError{color:var(--dsw-alias-state-error-primary,#dc2626);font-size:12px;line-height:18px;word-break:break-word}
 .dialogFoot{display:flex;justify-content:flex-end;gap:8px}
-.gateHost{display:flex;flex-direction:column}
+.gateScreen{height:100%;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px 48px}
 .gateCard{margin:32px auto;max-width:460px;padding:22px;display:flex;flex-direction:column;gap:10px;text-align:center;border:.5px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));border-radius:12px}
 .gateTitle{font-size:15px;line-height:22px;font-weight:600;color:var(--dsw-alias-label-primary,#1f2328)}
 .gateText{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#6b7280)}
