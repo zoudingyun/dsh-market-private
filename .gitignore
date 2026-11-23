@@ -10,3 +10,6 @@ Thumbs.db
 # market-ui（fork）的构建产物由它自己的 .gitignore 管，这里只兜底
 /market-ui/lib/
 /market-ui/dist/
+
+# 打给市场发布的 tgz
+dist/

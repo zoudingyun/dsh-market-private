@@ -41,6 +41,12 @@ dsh-market-private/
 - `GET /api/v1/catalog.json` —— awesome 形状目录（上游原生支持消费，不需要改代码）
 - `GET /api/v1/index.json` —— DSH format 1（原生「发现」页用，也可作为上游的第二个目录源）
 
+## 打包发布的三个坑（`scripts/pack-market-ui.mjs` 已处理）
+
+1. **`exports` 不能丢**：DSH 靠 `exports["./client"]` 找浏览器端 bundle。丢了它，宿主半边照常挂载，客户端半边被静默跳过（市场页整块消失，`/plugins/<name>/client.js` 404）——而且没有任何报错。
+2. **包名不能改**：`tsdown.config.ts` 里 `const id = 'dshmarket'` 是编译期写死的模块 id，preflight 还断言了产物前缀。改名后加载器报 `duplicate factory registration for "dshmarket"` 并拒绝加载。
+3. **`scripts.prepare` 要去掉、`engines.dsh` 要补上**：市场禁止安装脚本，也靠 `engines.dsh` 判断兼容。
+
 ## 升级上游的方式
 
 上游迭代很快（1.80.0 仍在发版），升级时**不要**整目录覆盖，否则改动丢失。建议：

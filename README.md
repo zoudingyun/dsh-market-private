@@ -216,6 +216,31 @@ dsh plugin --profile <profile> add link:D:/pro/dsh-market/market-ui
 
 它消费的是本服务的 `catalog.json`（awesome 形状），所以市场地址填 `http://<host>:4874/api/v1/catalog.json` 即可。
 
+### 把 fork 打成包发到本市场（桌面端 / 其它机器用这个）
+
+开发态可以 `link:` 源码，但桌面端的 profile 由 App 自己管，装不了链接——要一份能直接安装的包：
+
+```bash
+node scripts/pack-market-ui.mjs            # → dist/dshmarket-1.90.0.tgz
+node scripts/pack-market-ui.mjs --version 1.90.1
+# 然后发布 + 上架（管理端或 API）
+curl -XPOST -H "authorization: Bearer <token>" -H 'content-type: application/octet-stream' \
+     --data-binary @dist/dshmarket-1.90.0.tgz "http://<host>:4874/api/v1/releases?category=general"
+```
+
+打包时改了三处，都是市场硬性要求：去掉 `scripts.prepare`（禁止安装脚本）、补 `engines.dsh`、带上 `icon.svg`。
+**包名必须保持 `dshmarket`**——浏览器端 bundle 的模块 id 是编译期写死的（`market-ui/tsdown.config.ts` 的 `const id`），改名会让客户端半边静默不挂载（宿主半边却照常起来，很难查）。用版本号区分自己的线（`1.90.x`）。
+
+### 桌面端怎么装
+
+DSH 桌面版（0.2.2-rc.3）的 profile 由 App 自己管，最省事的路径是在 App 内装：
+
+1. 插件页 →「发现」→ 添加索引源 `http://<host>:4874/api/v1/index.json`；
+2. 搜「插件市场」→ 安装 → 重启 Desktop。
+
+装完侧栏会多一个「插件市场」，与内置「发现」页并存（两者读同一份数据；只想要一个的话，可以在插件页把 `@deepseek-ai/dsh-experimental-plugin-market-bundle` 关掉）。
+
+
 ## DSH 插件：插件页的「市场」标签页（`plugin/`，旧方案）
 
 不是另开一个侧栏，而是往**插件页**加第三个页签（`plugins.tab` 槽），和「已安装 / 发现」并排：
