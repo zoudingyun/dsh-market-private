@@ -18,6 +18,7 @@ import type { ReactElement } from 'react'
 import { marketElement } from '../../src/client/market-element.ts'
 import { MarketErrorBoundary } from '../../src/client/ErrorBoundary.tsx'
 import { MarketSection } from '../../src/client/MarketSection.tsx'
+import { MarketAuthGate } from '../../src/client/MarketAuthGate.tsx'
 
 interface SectionProps {
   t: unknown
@@ -31,6 +32,7 @@ interface SectionProps {
 
 function build(overrides: Partial<Parameters<typeof marketElement>[0]> = {}): {
   boundary: ReactElement<{ text: unknown; actions: unknown }>
+  gate: ReactElement<{ t: unknown }>
   section: ReactElement<SectionProps>
   exportLog: ReturnType<typeof vi.fn>
 } {
@@ -43,8 +45,11 @@ function build(overrides: Partial<Parameters<typeof marketElement>[0]> = {}): {
     crashText: { title: 'T', hint: 'H', reload: 'R', details: 'D' },
     exportLog,
     ...overrides,
-  }) as ReactElement<{ children: ReactElement<SectionProps> }>
-  return { boundary: tree as never, section: tree.props.children, exportLog }
+  }) as ReactElement<{ children: ReactElement<{ children: ReactElement<SectionProps> }> }>
+  // The panel now sits behind the private-market gate, which renders it only
+  // when no configured market insists on a login.
+  const gate = tree.props.children
+  return { boundary: tree as never, gate, section: gate.props.children, exportLog }
 }
 
 describe('marketElement', () => {
@@ -52,8 +57,9 @@ describe('marketElement', () => {
     // #293: a crash took the whole tree with it, including the export-log
     // button, so the reports that mattered most could not be produced. A
     // caller that mounted MarketSection directly would reintroduce that.
-    const { boundary, section } = build()
+    const { boundary, gate, section } = build()
     expect(boundary.type).toBe(MarketErrorBoundary)
+    expect(gate.type).toBe(MarketAuthGate)
     expect(section.type).toBe(MarketSection)
   })
 

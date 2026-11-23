@@ -17,6 +17,7 @@
 import { createElement as h } from 'react'
 import { MarketErrorBoundary } from './ErrorBoundary.tsx'
 import { MarketSection } from './MarketSection.tsx'
+import { MarketAuthGate } from './MarketAuthGate.tsx'
 import type { MarketSectionProps } from './MarketSection.tsx'
 import type { Translate } from './market-data.ts'
 import type { HostNavigationStore } from './host-navigation.ts'
@@ -67,7 +68,7 @@ export function marketElement(props: MarketElementProps): unknown {
       type: 'button',
       onClick: () => { props.exportLog() },
     }, props.t('exportLog')),
-  }, h(MarketSection, {
+  }, h(MarketAuthGate, { t: props.t, children: h(MarketSection, {
     t: props.t,
     locale: props.locale,
     theme: props.theme,
@@ -76,5 +77,5 @@ export function marketElement(props: MarketElementProps): unknown {
     sidebar: props.sidebar,
     hostNavigation: props.hostNavigation,
     surface: props.surface,
-  }))
+  }) }))
 }

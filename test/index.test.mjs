@@ -103,3 +103,21 @@ test('下架后索引里消失，包仍在库里', async () => {
   assert.equal(model.plugins.some((p) => p.name === '@team-a/dsh-foo'), false);
   assert.ok(q.get("SELECT id FROM releases WHERE id = ?", rel.id), '记录保留');
 });
+
+test('渲染结果随数据变化，不能因为缓存而钉死', async () => {
+  // 线上踩过的坑：renderFormat1 直接命中缓存就返回，版本比对永远走不到，
+  // 于是同一进程内上架/下架后索引还是旧的（CLI 在另一个进程改数据时反而正常）。
+  const { renderFormat1, renderCatalog } = await import('../src/index-format.mjs');
+  const before = renderFormat1();
+  const beforeCatalog = renderCatalog();
+  assert.equal(JSON.parse(before.body).plugins.some((p) => p.name === '@team-a/dsh-foo'), false, '此时是下架状态');
+
+  // 重新上架同一版本，数据签名应当变化 → 渲染结果跟着变
+  const rel = q.get("SELECT r.id FROM releases r JOIN plugins p ON p.id=r.plugin_id WHERE p.name = '@team-a/dsh-foo'");
+  q.run("UPDATE releases SET status = 'published', yanked_at = NULL, published_at = ? WHERE id = ?", new Date().toISOString(), rel.id);
+
+  const after = renderFormat1();
+  assert.notEqual(after.etag, before.etag, 'etag 必须变');
+  assert.equal(JSON.parse(after.body).plugins.some((p) => p.name === '@team-a/dsh-foo'), true);
+  assert.notEqual(renderCatalog().etag, beforeCatalog.etag, 'catalog 也要跟着变');
+});

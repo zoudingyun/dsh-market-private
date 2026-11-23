@@ -173,10 +173,17 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build
 - token 可单独作废（不动用户），作废后同一用户其它 token 不受影响
 - 索引产物被 DSH 自带 `parseMarketIndex` 校验通过（生成时硬断言，不通过不上架）
 
+**fork 消费端（`market-ui/`，真机验证）**
+
+- 添加 `http://192.168.100.100:4874/api/v1/catalog.json` → 目录合并成功，私有插件与官方 12.7k 条目并存
+- 打不开匿名读（`market.requireAuth=1`）→ 市场页变成登录门 → 用管理端账号登录 → 目录带 token 读取成功（源状态 `ok`）
+- 「已安装」页底部发布面板：选包 → 发布 → 市场出现 `pending` → 管理端上架 → 索引立即多出版本（无需重启）
+- `npm install --registry http://192.168.100.100:4874/registry/` 安装刚发布的版本成功
+
 **未验证**
 
-- DSH 客户端插件（市场 tab）尚未开发，目前用 DSH 原生「发现」页消费索引
 - 大规模并发与长时间运行
+- 上游 `market-ui` 测试在 Windows 有 1 个历史失败（`file:///opt/...` 路径解析），与本次改动无关
 
 ### 踩过的坑（都已在代码里处理）
 
@@ -189,7 +196,27 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build
 
 ---
 
-## DSH 插件：插件页的「市场」标签页（`plugin/`）
+## 消费端：fork 的 `market-ui/`（推荐）
+
+`market-ui/` 是 [dsh-market/dsh-market](https://github.com/dsh-market/dsh-market) 的 fork（基线 `dshmarket@1.80.0`，见 `market-ui/UPSTREAM.md`）。上游已经有完整的多市场目录（公共 / 组织锁定 / 用户自建）、安装、更新、备份，我们只补了它缺的三件事：
+
+| 能力 | 行为 |
+|---|---|
+| **自定义市场** | 上游自带；添加时先读一次，读不到不保存 |
+| **鉴权探测** | 市场若声明 `requiresAuth`，市场页换成登录门；允许匿名则正常浏览，目录行保留「登录」按钮 |
+| **登录** | 账号密码换 token，存 profile 的 market state（按 origin），目录请求自动带 `Authorization`；401 会清掉失效 token |
+| **发布本机插件** | 「已安装」页底部：选一个已装组合包 → `npm pack`（`link:` 会解析到源码目录）→ 上传到市场的 `/api/v1/releases`，状态为待审核 |
+
+安装（开发态）：
+
+```bash
+cd market-ui && npm install --ignore-scripts && npm run build
+dsh plugin --profile <profile> add link:D:/pro/dsh-market/market-ui
+```
+
+它消费的是本服务的 `catalog.json`（awesome 形状），所以市场地址填 `http://<host>:4874/api/v1/catalog.json` 即可。
+
+## DSH 插件：插件页的「市场」标签页（`plugin/`，旧方案）
 
 不是另开一个侧栏，而是往**插件页**加第三个页签（`plugins.tab` 槽），和「已安装 / 发现」并排：
 

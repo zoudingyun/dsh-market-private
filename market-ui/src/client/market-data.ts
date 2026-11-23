@@ -142,6 +142,8 @@ export interface CatalogSourceInfo {
   locked: boolean
   /** An imported offline bundle: its plugins install from files that came with it. */
   offline?: true
+  /** `scheme://host:port` of the saved address, when the host reports one. */
+  origin?: string
 }
 
 /** The catalog payload under `registry` in /dsh-market/registry. */

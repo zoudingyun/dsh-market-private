@@ -43,3 +43,20 @@ jobs:
           curl -fsS http://127.0.0.1:4875/api/v1/health | grep -q '"ok": true'
           curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:4875/admin | grep -q 200
           docker rm -f ci-market
+
+  market-ui:
+    name: market-ui (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: market-ui/package-lock.json
+      - name: install
+        run: cd market-ui && npm ci --ignore-scripts --no-audit --no-fund
+      - name: typecheck (host + client)
+        run: cd market-ui && npm run typecheck
+      - name: build
+        run: cd market-ui && npm run build

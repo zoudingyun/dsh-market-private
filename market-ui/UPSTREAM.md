@@ -10,15 +10,22 @@
 | 许可 | MIT（见 `LICENSE`） |
 | 引入方式 | 下载该提交的源码包解压入库，未保留上游 `.git` |
 
-## 我们需要在上游之上加的三个口子
+## 已落地的三个口子（2026-11-23）
 
 上游已经具备：多市场目录（公共 / 组织锁定 / 用户自建，`src/catalogs.ts` + `src/client/CatalogsPanel.tsx`）、安装、更新、备份、诊断。缺的正好是三件：
 
-| 编号 | 能力 | 落点（预计） |
-|---|---|---|
-| P1 | **市场鉴权探测**：添加自定义市场时先 `GET /api/v1/market/info`，按 `requiresAuth` 决定免登录 / 可选登录 / 强制登录 | `src/client/CatalogsPanel.tsx`、`src/catalogs.ts` |
-| P2 | **登录**：账号密码换 token，token 存进宿主凭据（不落明文到目录配置），请求索引时注入 `Authorization` | 新增 `src/account.ts`、`src/routes.ts` |
-| P3 | **发布本机插件**：列已装组合包 → 打包 → `POST /api/v1/releases` | 新增 `src/publish.ts`、`src/routes.ts` |
+| 编号 | 能力 | 落点 | 状态 |
+|---|---|---|---|
+| P1 | **市场鉴权探测**：读 `/api/v1/market/info`，`requiresAuth` 且未登录 → 页面换成登录门；匿名可读则正常浏览，只在目录行留一个「登录」 | `src/accounts.ts`、`src/routes.ts`（`/dsh-market/account`）、`src/client/MarketAuthGate.tsx` | ✅ 真机验证 |
+| P2 | **登录**：账号密码换 token，存进 profile 的 `market state`（`accounts`，按 origin），目录请求自动注入 `Authorization` | `src/accounts.ts`、`src/hot.ts`、`src/catalogs.ts`、`src/client/MarketLoginDialog.tsx` | ✅ 真机验证 |
+| P3 | **发布本机插件**：列已装组合包 → `npm pack`（含 `link:` 解析）→ `POST /api/v1/releases` | `src/publish.ts`、`src/routes.ts`、`src/client/PublishPanel.tsx`（已安装页底部） | ✅ 真机验证 |
+
+### 与上游行为的差异（刻意为之）
+
+1. **`UserCatalog` 仍然只有 `{id, url, file}`** —— token 不进目录配置，按 origin 存在市场状态里。这样删目录不会顺手丢凭据，凭据也不会跟着备份里的目录一起被复制出去。
+2. **鉴权失败会清 token**：目录读取或发布收到 401 时丢掉该 origin 的 token，下次进页面就重新要求登录，而不是永远静默失败。
+3. **发布面板放在「已安装」页底部**：发布的对象就是那一页列出的东西；设置页里也有一份（`SettingsCard` 的「插件目录」下面）。
+4. **`market-element` 外面包了一层 `MarketAuthGate`**：`tests/client/market-element.client.spec.ts` 相应改成先取 gate 再取 section。
 
 ## 与根目录服务端的关系
 

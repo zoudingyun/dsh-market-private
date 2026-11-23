@@ -27,6 +27,7 @@ import { asRegion, normalizeGithubProxy, type Region } from './regions.ts'
 import { findDshInstallDir } from './dsh-install.ts'
 import { logEvent } from './log.ts'
 import { MAX_USER_CATALOGS, validUserCatalog, type UserCatalog } from './catalogs.ts'
+import type { MarketAccount } from './accounts.ts'
 import { bundlePatchTargets, declaredBundlePatchFiles, entryArtifactExists } from './profile.ts'
 
 interface HotRow {
@@ -414,6 +415,16 @@ export interface MarketState {
    */
   userCatalogs?: UserCatalog[]
   /**
+   * Bearer tokens for private markets, keyed by origin.
+   *
+   * Stored here because a catalog that needs a credential needs one on every
+   * fetch, including the ones that happen long after the login form closed.
+   * The file lives in the profile like the rest of the market state, which is
+   * also why a backup carries it — and why `listAccounts` never hands the
+   * token to the browser: only the routes' outbound requests use it.
+   */
+  accounts?: Record<string, MarketAccount>
+  /**
    * Package names the user hid from Discover and Themes (#657).
    *
    * Local, per-profile, reversible. The Hidden tab lists the same names so
@@ -659,6 +670,38 @@ function installTimestamp(value: unknown): string | undefined {
  * ones written: the map is a lookup for "when did I install this", and the
  * oldest 50 installs are exactly the ones nobody is asking about.
  */
+/**
+ * Bearer tokens for private markets, as read back from disk.
+ *
+ * The state file is untrusted input: an origin that is not http(s), a token
+ * that is not a string, or an entry with no token at all is dropped rather
+ * than carried into an `Authorization` header.
+ */
+function accountsFromUnknown(value: unknown): Record<string, MarketAccount> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const out: Record<string, MarketAccount> = {}
+  for (const [origin, raw] of Object.entries(value)) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const record = raw as { token?: unknown; user?: unknown; role?: unknown; at?: unknown }
+    if (typeof record.token !== 'string' || record.token === '') continue
+    let normalized: string
+    try {
+      const parsed = new URL(origin)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue
+      normalized = parsed.origin.toLowerCase()
+    } catch {
+      continue
+    }
+    out[normalized] = {
+      token: record.token,
+      user: typeof record.user === 'string' ? record.user : '',
+      ...(typeof record.role === 'string' ? { role: record.role } : {}),
+      at: typeof record.at === 'string' ? record.at : new Date(0).toISOString(),
+    }
+  }
+  return Object.keys(out).length === 0 ? undefined : out
+}
+
 function installTimesFromUnknown(value: unknown): Record<string, InstallTimes> | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const out: Record<string, InstallTimes> = {}
@@ -762,6 +805,7 @@ export function readMarketState(profileDir: string): MarketState {
       settingsSection?: unknown
       pluginsTab?: unknown
       installTimes?: unknown
+      accounts?: unknown
     }
     const disabled = uniqueStrings(state.disabled !== undefined ? state.disabled : state.disabledSkins)
     const groups: Record<string, string[]> = {}
@@ -782,6 +826,7 @@ export function readMarketState(profileDir: string): MarketState {
     const userCatalogs = userCatalogsFromUnknown(state.userCatalogs)
     const brokenPlugins = brokenPluginsFromUnknown(state.brokenPlugins)
     const installTimes = installTimesFromUnknown(state.installTimes)
+    const accounts = accountsFromUnknown(state.accounts)
     // The order and the map are two halves of one fact, and a state file can
     // carry them out of step (#964): the UI then lists a group the routes
     // cannot find, so "assign to" and even "delete" answer group-not-found
@@ -811,6 +856,7 @@ export function readMarketState(profileDir: string): MarketState {
       ...(userCatalogs.length === 0 ? {} : { userCatalogs }),
       ...(brokenPlugins === undefined ? {} : { brokenPlugins }),
       ...(installTimes === undefined ? {} : { installTimes }),
+      ...(accounts === undefined ? {} : { accounts }),
       // true AND false are both preserved: on a host with no settings page
       // this switch is the market's only entry, so "the user turned it off"
       // must be distinguishable from "nobody has chosen yet" (#846).
@@ -914,6 +960,10 @@ function writeState(profileDir: string, state: MarketState, ownStamps: boolean):
     : onDisk.regionAuto
   const favorites = state.favorites ?? onDisk.favorites ?? []
   const userCatalogs = state.userCatalogs ?? onDisk.userCatalogs ?? []
+  // Logging out has to be expressible, so an explicit empty map wins. Callers
+  // that never touch accounts omit the field and leave disk alone — the same
+  // contract as favorites above.
+  const accounts = state.accounts ?? onDisk.accounts ?? {}
   const blocked = state.blocked ?? onDisk.blocked ?? []
   const updateExempt = state.updateExempt ?? onDisk.updateExempt ?? []
   const backgroundUpdateChecks = state.backgroundUpdateChecks ?? onDisk.backgroundUpdateChecks
@@ -946,6 +996,9 @@ function writeState(profileDir: string, state: MarketState, ownStamps: boolean):
     groupOrder: state.groupOrder,
     ...(favorites.length > 0 ? { favorites } : {}),
     ...(userCatalogs.length > 0 ? { userCatalogs } : {}),
+    // Omitted while empty so a profile that never logged in keeps a state file
+    // with no credential-shaped keys in it at all.
+    ...(Object.keys(accounts).length > 0 ? { accounts } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
     ...(updateExempt.length > 0 ? { updateExempt } : {}),
     ...(typeof backgroundUpdateChecks === 'boolean' ? { backgroundUpdateChecks } : {}),

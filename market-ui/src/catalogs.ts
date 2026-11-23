@@ -31,6 +31,7 @@ import { BODY_STALL_TIMEOUT_MS, HEADERS_TIMEOUT_MS, readBodyWhileProgressing } f
 import { expandHomePath } from './home-paths.ts'
 import { logEvent } from './log.ts'
 import { marketFetch } from './net.ts'
+import { forgetAccount, marketAuthorizationFor } from './accounts.ts'
 import { isInsideOfflineRoot, resolveBundleFile } from './offline.ts'
 import {
   asLabel, CATALOG_ID_RE, expandEnv, getPolicy, globMatch, pinnedVersion, PUBLIC_SOURCE_ID, type LocalizedLabel, type Policy,
@@ -62,6 +63,14 @@ export interface SourceInfo {
   label: LocalizedLabel
   /** Host and path (or file path) for display; no credentials, no query. */
   where: string
+  /**
+   * `scheme://host[:port]` of the saved address, when it has one.
+   *
+   * The origin only — never the full address: a catalog URL can carry a query
+   * string or user info, and this field reaches the browser. A private market
+   * needs exactly this much to know which account to use.
+   */
+  origin?: string
   /** `off`: the policy turned the public catalog off. */
   status: 'ok' | 'failed' | 'off'
   count: number
@@ -121,7 +130,10 @@ function userSource(entry: UserCatalog): ExtraSource {
     label: fallback,
     ...(entry.url !== undefined ? { url: entry.url } : {}),
     ...(entry.file !== undefined ? { file: entry.file } : {}),
-    headers: {},
+    // A private market's token rides along on every fetch of this source. A
+    // public one has no account, so this stays empty and the request goes out
+    // anonymously — exactly as before this feature existed.
+    headers: marketAuthorizationFor(entry.url),
   }
 }
 
@@ -405,7 +417,13 @@ async function readSource(
     clearTimeout(deadline)
   }
   if (res.status === 304 && reusable !== undefined) return { cached: reusable, secrets }
-  if (res.status === 401 || res.status === 403) throw new SourceFailure('auth', String(res.status))
+  if (res.status === 401 || res.status === 403) {
+    // A token we hold and the market rejects is a token that will never work
+    // again (revoked, password changed, database restored). Drop it here: the
+    // next page load then says "log in" instead of failing quietly forever.
+    if (source.kind === 'user' && Object.keys(headers).length > 0) forgetAccount(url)
+    throw new SourceFailure('auth', String(res.status))
+  }
   if (!res.ok) throw new SourceFailure('http', String(res.status))
   const text = new TextDecoder().decode(await readBodyWhileProgressing(res, BODY_STALL_TIMEOUT_MS, 'the catalog'))
   return {

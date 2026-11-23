@@ -15,8 +15,14 @@ import { parseMarketIndex } from '../vendor/dsh-plugin-market-index.mjs';
  */
 const cache = { version: -1, format1: null, catalog: null, icons: null };
 
-function model() {
-  // 进程内计数 + 数据签名 + 外部源时间戳：三者任一变化都重建
+/**
+ * 缓存键：进程内计数 + 数据签名 + 外部源时间戳。
+ *
+ * 必须在**每次渲染前**比对，不能只在下游重建时比对 —— 之前就是这样漏的：
+ * 渲染函数先命中 `cache.format1` 直接返回，永远走不到比对那一步，于是上架/
+ * 下架在同一进程内不生效，直到重启（CLI 在另一个进程改数据时看着正常）。
+ */
+function fresh() {
   const version = `${getIndexVersion()}|${dataSignature()}|${sourceStatus().at}`;
   if (cache.version !== version) {
     cache.version = version;
@@ -24,7 +30,6 @@ function model() {
     cache.catalog = null;
     cache.icons = null;
   }
-  return buildIndexModel();
 }
 
 const absIcon = (icon) => {
@@ -35,8 +40,9 @@ const absIcon = (icon) => {
 
 /** format 1：硬断言，绝不返回 DSH 会拒绝的文档 */
 export function renderFormat1() {
+  fresh();
   if (cache.format1) return cache.format1;
-  const doc = model();
+  const doc = buildIndexModel();
   parseMarketIndex(doc, `${config.publicBaseUrl}/api/v1/index.json`);
   const body = JSON.stringify(doc, null, 2) + '\n';
   cache.format1 = { body, etag: etagOf(body) };
@@ -45,8 +51,9 @@ export function renderFormat1() {
 
 /** awesome 形状：dsh-market / 任何按该形状实现的市场都能直接消费 */
 export function renderCatalog() {
+  fresh();
   if (cache.catalog) return cache.catalog;
-  const doc = model();
+  const doc = buildIndexModel();
   const plugins = doc.plugins.map((p) => {
     const repo = p.repository?.url;
     const owner = p.name.startsWith('@') ? p.name.slice(1).split('/')[0] : (p.author ?? 'unknown');

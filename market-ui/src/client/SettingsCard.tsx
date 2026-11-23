@@ -42,6 +42,7 @@ import { api, applyGithubRouting, marketHeldVersionText, profileBlockedText } fr
 import type { MarketLocaleStore, MarketStatus, Translate, UpdateStatus } from './market-data.ts'
 import { useUpdateNotifications, refreshUpdateNotifications } from './update-notifications.ts'
 import { CatalogsPanel, catalogsVisible, readCatalogs } from './CatalogsPanel.tsx'
+import { PublishPanel } from './PublishPanel.tsx'
 import type { CatalogsData } from './CatalogsPanel.tsx'
 import type { SidebarEntry } from './sidebar-entry.ts'
 import type { EntryKey, EntryVisibility } from './entry-visibility.ts'
@@ -709,7 +710,8 @@ export function SettingsCard({ t, locale, onRemoved, sidebar, entries }: Setting
         advancedOpen
           ? h('div', { id: advancedId, className: css.setAdvancedBody },
               entryRows.map((node, index) => h(Fragment, { key: index }, node)),
-              catalogsBlock)
+              catalogsBlock,
+              h(PublishPanel, { key: 'publish', t }))
           : null,
       )
     : null

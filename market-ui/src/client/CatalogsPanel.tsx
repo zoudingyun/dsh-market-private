@@ -13,13 +13,15 @@
  * back.
  */
 
-import { createElement as h, useCallback, useRef, useState } from 'react'
+import { createElement as h, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './Market.module.css'
 import { api, sourceErrorText, sourceLabel } from './market-data.ts'
 import type { CatalogSourceInfo, LocalizedText, SourceError, Translate } from './market-data.ts'
 import { discoveryScan } from './MarketImages.tsx'
+import { MarketLoginDialog } from './MarketLoginDialog.tsx'
+import { readAccounts } from './MarketAuthGate.tsx'
 
 /** What `/dsh-market/catalogs` answers. */
 export interface CatalogsData {
@@ -80,7 +82,18 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ text: string; bad: boolean } | null>(null)
+  /** A market we are being asked to log in to (add failed with auth, or the user clicked 登录). */
+  const [login, setLogin] = useState<{ server: string } | null>(null)
+  /** Origins this profile holds a token for, so a row can say 退出 instead of 登录. */
+  const [authed, setAuthed] = useState<string[]>([])
   const chooser = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      const reply = await readAccounts()
+      if (reply !== null) setAuthed(reply.accounts.map(account => account.server))
+    })()
+  }, [])
 
   const changed = useCallback(async (): Promise<void> => {
     await reload()
@@ -88,7 +101,7 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
     void discoveryScan.resume().catch(() => { /* the page reports its own failure */ })
   }, [reload])
 
-  const onAdd = useCallback(() => {
+  const sendAdd = useCallback((source: string) => {
     setBusy(true)
     setMessage({ text: t('setCatalogChecking'), bad: false })
     void (async () => {
@@ -96,16 +109,22 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
         const response = await fetch(api('/dsh-market/catalogs/add'), {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ source: draft }),
+          body: JSON.stringify({ source }),
         })
         const body = await response.json() as {
           ok?: boolean; count?: number; code?: string; limit?: number; source?: SourceError; error?: string
+          needsLogin?: boolean; server?: string
         }
         if (body.ok === true) {
           setMessage({ text: body.count === 1 ? t('setCatalogAddedOne') : t('setCatalogAdded').replace('{0}', String(body.count ?? 0)), bad: false })
           setDraft('')
           setAdding(false)
           await changed()
+        } else if (body.needsLogin === true && body.server !== undefined) {
+          // The catalog is fine; it just wants a credential. Offer the login
+          // and keep the address, so one more click finishes the add.
+          setMessage(null)
+          setLogin({ server: body.server })
         } else if (body.code === 'unreadable') {
           setMessage({ text: sourceErrorText(body.source, t), bad: true })
         } else {
@@ -118,7 +137,29 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
         setBusy(false)
       }
     })()
-  }, [changed, data.limit, draft, t])
+  }, [changed, data.limit, t])
+
+  const onAdd = useCallback(() => { sendAdd(draft) }, [draft, sendAdd])
+
+  /** Forget this market's token. The catalog stays; it simply goes anonymous. */
+  const signOut = useCallback((server: string) => {
+    setBusy(true)
+    void (async () => {
+      try {
+        await fetch(api('/dsh-market/account/logout'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ server }),
+        })
+        setAuthed(current => current.filter(item => item !== server))
+        await changed()
+      } catch {
+        setMessage({ text: t('srcErrNetwork'), bad: true })
+      } finally {
+        setBusy(false)
+      }
+    })()
+  }, [changed, t])
 
   /** Send a chosen offline bundle to the server as it is; the server unpacks it under its own rules. */
   const onImport = useCallback((file: File) => {
@@ -177,7 +218,11 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
     ? `${t('setCatalogOff')} · ${t('setCatalogOrg')}`
     : publicInfo?.status === 'ok' ? countText(t, publicInfo.count) : ''
 
-  const sourceRow = (source: CatalogSourceInfo): ReactElement => h('div', { key: source.id, className: css.setCatalogRow },
+  const sourceRow = (source: CatalogSourceInfo): ReactElement => {
+    // Only the user's own url sources can have an account; policy sources and
+    // offline bundles cannot.
+    const origin = source.kind === 'user' ? source.origin ?? null : null
+    return h('div', { key: source.id, className: css.setCatalogRow },
     h('div', { className: css.setCatalogName },
       h('div', { className: css.setLabel }, nameOf(source.label)),
       h('div', { className: css.setCatalogMeta },
@@ -186,14 +231,28 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
         ? h('div', { className: css.setCatalogErr, title: source.error?.detail }, sourceErrorText(source.error, t))
         : null,
     ),
-    source.locked
-      ? h('span', { className: css.setCatalogLock }, t('setCatalogOrg'))
-      : h(Button, {
-          variant: 'ghost', size: 'sm', disabled: busy,
-          'aria-label': `${t('setCatalogRemove')} ${nameOf(source.label)}`,
-          onClick: () => { onRemove(source.id) },
-        }, t('setCatalogRemove')),
+    h('div', { className: css.setCatalogActions },
+      ...(origin === null
+        ? []
+        : [authed.includes(origin)
+          ? h(Button, {
+              key: 'logout', variant: 'ghost', size: 'sm', disabled: busy,
+              onClick: () => { signOut(origin) },
+            }, t('loginLogout'))
+          : h(Button, {
+              key: 'login', variant: 'ghost', size: 'sm', disabled: busy,
+              onClick: () => { setLogin({ server: origin }) },
+            }, t('loginAction'))]),
+      source.locked
+        ? h('span', { className: css.setCatalogLock }, t('setCatalogOrg'))
+        : h(Button, {
+            variant: 'ghost', size: 'sm', disabled: busy,
+            'aria-label': `${t('setCatalogRemove')} ${nameOf(source.label)}`,
+            onClick: () => { onRemove(source.id) },
+          }, t('setCatalogRemove')),
+    ),
   )
+  }
 
   return h('div', { className: css.setConfirm },
     h('div', { className: css.setLabel }, t('setCatalogs')),
@@ -271,5 +330,20 @@ export function CatalogsPanel({ data, t, lang, reload }: CatalogsPanelProps): Re
     message === null
       ? null
       : h('div', { className: message.bad ? css.setCatalogErr : css.setHint, role: 'status' }, message.text),
+    login === null
+      ? null
+      : h(MarketLoginDialog, {
+        t,
+        server: login.server,
+        onClose: () => { setLogin(null) },
+        onDone: (server) => {
+          setLogin(null)
+          setAuthed(current => (current.includes(server) ? current : [...current, server]))
+          // A first-time add parks the address in the draft; finishing the
+          // login should finish the add too, not leave it half-done.
+          if (adding && draft.trim() !== '') sendAdd(draft)
+        },
+      }),
   )
 }
+

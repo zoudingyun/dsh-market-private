@@ -77,8 +77,14 @@ export function userFromToken(header) {
 export function login(name, password) {
   const user = q.get('SELECT * FROM users WHERE name = ? AND status = ?', name, 'active');
   if (!user || !verifyPassword(password, user.password_hash)) return null;
-  // 登录即轮换：同一用户只保留一个有效的 login token，避免记录越攒越多
-  q.run("UPDATE tokens SET revoked_at = ? WHERE user_id = ? AND label = 'login' AND revoked_at IS NULL", now(), user.id);
+  // 登录不再一刀切作废旧 token：那样在第二台设备登录就会把第一台踢下线。
+  // 改成「保留最近 5 个 login token，更早的作废」——记录不会无限膨胀，多设备也能共存。
+  q.run(`UPDATE tokens SET revoked_at = ?
+          WHERE user_id = ? AND label = 'login' AND revoked_at IS NULL
+            AND id NOT IN (
+              SELECT id FROM tokens WHERE user_id = ? AND label = 'login' AND revoked_at IS NULL
+               ORDER BY created_at DESC LIMIT 4
+            )`, now(), user.id, user.id);
   return { user: { id: user.id, name: user.name, role: user.role, scope: user.scope }, token: issueToken(user.id, 'login') };
 }
 

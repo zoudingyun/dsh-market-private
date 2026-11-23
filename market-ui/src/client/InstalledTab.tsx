@@ -4,6 +4,7 @@
 
 import { Button, DisclosureRow, Input, Menu, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './Market.module.css'
+import { PublishPanel } from './PublishPanel.tsx'
 import { SearchInput } from './SearchInput.tsx'
 import {
   catalogEntryForInstalled,
@@ -932,6 +933,9 @@ export function InstalledTab({ c }: { c: InstalledTabCtx }) {
         {t('installedDependencyNote').replace('{0}', String(dependencyOnlyNames.size))}
       </p>
     )}
+    {/* The other direction of the same list: these are the packages an
+        author can publish, and this is where they are looking at them. */}
+    <PublishPanel t={t} />
     </>
   )
 }

@@ -37,6 +37,8 @@ import { dshHostInfo, findDshInstallDir } from './dsh-install.ts'
 import { catalogReleaseManifest, deriveHostCompatibility, DiscoveryManifestIndex, findCompatibleVersion, githubCompatibilityRevision, type HostCompatibility } from './discovery-compatibility.ts'
 import { configurePersistentLog, exportLogs, logEvent, readPersistentLog } from './log.ts'
 import { marketFetch } from './net.ts'
+import { AccountError, accountFor, listAccounts, loginRemote, marketOrigin, probeMarket, forgetAccount, setAccounts } from './accounts.ts'
+import { listLocalBundles, publishBundle, PublishError } from './publish.ts'
 import { catalogReleaseSourceOf, publishedReleaseUpdate, type CatalogReleaseSource } from './release-updates.ts'
 import { diagnosePackageManifests } from './diagnostics.ts'
 import {
@@ -797,6 +799,10 @@ export function mountMarketRoutes(
   const marketState = readMarketState(activeProfileDir)
   setCustomGithubProxy(marketState.githubProxy ?? null)
   setUserCatalogs(marketState.userCatalogs ?? [])
+  // Private-market tokens, seeded from the same file. `catalogs.ts` reads them
+  // per request through `marketAuthorizationFor`, so this must happen before
+  // the first catalog load.
+  setAccounts(marketState.accounts ?? {})
   // The profile's own .npmrc is the first place a private registry is named.
   setNpmrcProfileDir(activeProfileDir)
   const disabled = marketState.disabled
@@ -933,6 +939,8 @@ export function mountMarketRoutes(
     marketState.githubProxy = fresh.githubProxy
     marketState.userCatalogs = fresh.userCatalogs
     setUserCatalogs(fresh.userCatalogs ?? [])
+    marketState.accounts = fresh.accounts
+    setAccounts(fresh.accounts ?? {})
     // A restore or an external writer can change these two too; a stale copy
     // here would put the old answer back on the next whole-state save (#435).
     marketState.settingsSection = fresh.settingsSection
@@ -5345,6 +5353,229 @@ export function mountMarketRoutes(
      * The catalogs list in Settings: what is configured and how each source
      * answered the last read. Never carries a header, a token or a query string.
      */
+    /**
+     * Who this profile is logged in to.
+     *
+     * `?probe=<address>` asks the same question for a market that is not saved
+     * yet: the settings card calls it before adding a catalog, so a market that
+     * wants a password can say so instead of failing as "unreadable".
+     */
+    registerRoute({
+      kind: 'exact',
+      path: '/dsh-market/account',
+      handler: async (request, response) => {
+        if (request.method !== 'GET') {
+          response.writeHead(405, { allow: 'GET' })
+          response.end()
+          return
+        }
+        try {
+          const asked = new URL(request.url ?? '/', 'http://localhost').searchParams.get('probe')
+          const info = asked === null || asked.trim() === '' ? null : await probeMarket(asked)
+          // Every configured source that points at a market which may want a
+          // credential, so the page can decide between "browse" and "log in
+          // first" without probing from the browser (CORS would stop it).
+          const markets = await Promise.all(
+            catalogConfig().extras
+              .filter(source => source.kind === 'user' && source.url !== undefined)
+              .map(async (source) => {
+                const origin = marketOrigin(source.url ?? '')
+                if (origin === null) return null
+                const probed = await probeMarket(origin)
+                return {
+                  server: origin,
+                  label: source.label,
+                  requiresAuth: probed?.requiresAuth === true,
+                  ...(probed?.name === undefined ? {} : { name: probed.name }),
+                  authed: accountFor(origin) !== null,
+                }
+              }),
+          )
+          sendJson(response, 200, { accounts: listAccounts(), info, markets: markets.filter(item => item !== null) })
+        } catch (error) {
+          sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    }),
+
+    /**
+     * Log in to a private market and keep the token for its origin.
+     *
+     * The password is used once, here, and never written anywhere: what lands
+     * in the profile's market state is the token the market issued.
+     */
+    registerRoute({
+      kind: 'exact',
+      path: '/dsh-market/account/login',
+      handler: async (request, response) => {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { allow: 'POST' })
+          response.end()
+          return
+        }
+        if (!sameOrigin(request)) {
+          sendJson(response, 403, { error: 'untrusted origin' })
+          return
+        }
+        try {
+          await withMutationQueued(async () => {
+            const body = (await readJsonBody(request)) as { server?: unknown; name?: unknown; password?: unknown } | null
+            const server = typeof body?.server === 'string' ? body.server : ''
+            const name = typeof body?.name === 'string' ? body.name : ''
+            const password = typeof body?.password === 'string' ? body.password : ''
+            const outcome = await loginRemote(server, name, password)
+            const state = readMarketState(activeProfileDir)
+            writeMarketState(activeProfileDir, {
+              ...state,
+              accounts: {
+                ...(state.accounts ?? {}),
+                [outcome.server]: {
+                  token: outcome.token,
+                  user: outcome.user,
+                  ...(outcome.role === undefined ? {} : { role: outcome.role }),
+                  at: outcome.at,
+                },
+              },
+            })
+            refreshMarketState()
+            // The catalog that failed with 'auth' a moment ago can be read now.
+            forgetCatalog()
+            logEvent('info', 'account', `logged in to ${new URL(outcome.server).host} as ${outcome.user}`)
+            sendJson(response, 200, {
+              ok: true,
+              server: outcome.server,
+              user: outcome.user,
+              ...(outcome.role === undefined ? {} : { role: outcome.role }),
+              info: outcome.info,
+            })
+          })
+        } catch (error) {
+          if (error instanceof AccountError) {
+            const status = error.code === 'bad-credentials' ? 401 : error.code === 'network' ? 502 : 400
+            sendJson(response, status, { ok: false, code: error.code, error: error.message })
+            return
+          }
+          sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    }),
+
+    /** Forget the token for one market. The catalog stays, it just goes anonymous. */
+    registerRoute({
+      kind: 'exact',
+      path: '/dsh-market/account/logout',
+      handler: async (request, response) => {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { allow: 'POST' })
+          response.end()
+          return
+        }
+        if (!sameOrigin(request)) {
+          sendJson(response, 403, { error: 'untrusted origin' })
+          return
+        }
+        try {
+          await withMutationQueued(async () => {
+            const body = (await readJsonBody(request)) as { server?: unknown } | null
+            const server = typeof body?.server === 'string' ? body.server : ''
+            const origin = marketOrigin(server)
+            if (origin === null) {
+              sendJson(response, 400, { ok: false, code: 'bad-server', error: '市场地址不对 / invalid market address' })
+              return
+            }
+            const state = readMarketState(activeProfileDir)
+            const next = { ...(state.accounts ?? {}) }
+            delete next[origin]
+            writeMarketState(activeProfileDir, { ...state, accounts: next })
+            forgetAccount(origin)
+            refreshMarketState()
+            forgetCatalog()
+            logEvent('info', 'account', `logged out of ${new URL(origin).host}`)
+            sendJson(response, 200, { ok: true, server: origin })
+          })
+        } catch (error) {
+          sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    }),
+
+    /**
+     * What could be published from this profile.
+     *
+     * Paths stay on the host: the browser gets names and versions, and the
+     * pack step looks the directory up again from `config`, so a request
+     * cannot point the packer at an arbitrary folder.
+     */
+    registerRoute({
+      kind: 'exact',
+      path: '/dsh-market/publish/candidates',
+      handler: async (request, response) => {
+        if (request.method !== 'GET') {
+          response.writeHead(405, { allow: 'GET' })
+          response.end()
+          return
+        }
+        try {
+          sendJson(response, 200, {
+            bundles: listLocalBundles(config.profile, config.profileDirectory),
+            accounts: listAccounts(),
+          })
+        } catch (error) {
+          sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    }),
+
+    /**
+     * Pack one installed bundle and POST it to a market's release endpoint.
+     *
+     * The market decides what "published" means — ours queues it for review —
+     * so the answer's `status` is reported as-is rather than guessed.
+     */
+    registerRoute({
+      kind: 'exact',
+      path: '/dsh-market/publish',
+      handler: async (request, response) => {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { allow: 'POST' })
+          response.end()
+          return
+        }
+        if (!sameOrigin(request)) {
+          sendJson(response, 403, { error: 'untrusted origin' })
+          return
+        }
+        try {
+          const body = (await readJsonBody(request)) as { server?: unknown; name?: unknown; category?: unknown; labels?: unknown } | null
+          const server = typeof body?.server === 'string' ? body.server : ''
+          const name = typeof body?.name === 'string' ? body.name : ''
+          const category = typeof body?.category === 'string' ? body.category : undefined
+          const labels = Array.isArray(body?.labels) ? body.labels.filter((item): item is string => typeof item === 'string') : undefined
+          if (name === '') {
+            sendJson(response, 400, { ok: false, code: 'not-installed', error: '没有指定要发布的插件 / no plugin named' })
+            return
+          }
+          const result = await publishBundle({
+            server,
+            name,
+            profile: config.profile,
+            ...(config.profileDirectory === undefined ? {} : { profileDirectory: config.profileDirectory }),
+            ...(category === undefined ? {} : { category }),
+            ...(labels === undefined ? {} : { labels }),
+          })
+          logEvent('info', 'publish', `published ${result.name}@${result.version} to ${new URL(result.server).host} (${result.status})`)
+          sendJson(response, 200, { ok: true, ...result })
+        } catch (error) {
+          if (error instanceof PublishError) {
+            const status = error.code === 'unauthenticated' ? 401 : error.code === 'network' ? 502 : 400
+            sendJson(response, status, { ok: false, code: error.code, error: error.message })
+            return
+          }
+          sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+        }
+      },
+    }),
+
     registerRoute({
       kind: 'exact',
       path: '/dsh-market/catalogs',
@@ -5362,8 +5593,17 @@ export function mountMarketRoutes(
             // still carries the per-source answers.
             sources = await loadRegistry().then(registry => registry.sources ?? [], (error: unknown) => (error instanceof CatalogLoadError ? error.sources : []))
           }
+          // The origin (and only the origin) rides along for the user's own
+          // sources: the settings card needs it to offer a login for that
+          // market, and a saved address can carry a query string or user info
+          // that must never reach the browser.
+          const withOrigin = sources.map((source) => {
+            const extra = config.extras.find(item => item.id === source.id)
+            const origin = extra?.url === undefined ? null : marketOrigin(extra.url)
+            return origin === null ? source : { ...source, origin }
+          })
           sendJson(response, 200, {
-            sources,
+            sources: withOrigin,
             publicCatalog: { enabled: config.publicEnabled, locked: config.policy.publicCatalog === false },
             userCatalogsAllowed: config.policy.userCatalogs,
             limit: MAX_USER_CATALOGS,
@@ -5419,6 +5659,22 @@ export function mountMarketRoutes(
             // Read it once before keeping it: what is saved is known to work.
             const probe = await probeCatalog(parsed)
             if (probe.registry === null) {
+              // A market that refuses anonymous reads is not a broken address.
+              // Ask it (anonymously) what it wants, so the card can offer a
+              // login form instead of "unreadable" (#private-market).
+              if (probe.info.error?.code === 'auth' && parsed.url !== undefined) {
+                const origin = marketOrigin(parsed.url)
+                const info = origin === null ? null : await probeMarket(origin)
+                sendJson(response, 401, {
+                  ok: false,
+                  code: 'auth',
+                  needsLogin: true,
+                  ...(origin === null ? {} : { server: origin }),
+                  ...(info === null ? {} : { info }),
+                  error: '这个市场需要登录 / this market requires a login',
+                })
+                return
+              }
               sendJson(response, 400, { ok: false, code: 'unreadable', source: probe.info.error, error: `could not read the catalog (${probe.info.error?.code ?? 'unknown'}) / 读不了这个目录` })
               return
             }
