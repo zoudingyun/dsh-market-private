@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    name: test (node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: unit tests
+        run: npm test
+      - name: plugin bundle structure
+        run: node --check plugin/client.js && node --check plugin/index.js
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -f deploy/Dockerfile -t dsh-market:ci .
+      - name: image smoke
+        run: |
+          docker run -d --name ci-market -p 4875:4874 \
+            -e PORT=4874 \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:4875 \
+            -e PUBLIC_REGISTRY_URL=http://127.0.0.1:4875/registry \
+            dsh-market:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4875/api/v1/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4875/api/v1/health | grep -q '"ok": true'
+          curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:4875/admin | grep -q 200
+          docker rm -f ci-market
