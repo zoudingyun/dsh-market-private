@@ -1,0 +1,26 @@
+{
+  "name": "@local/dsh-market-tab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH 插件页的「市场」标签页：浏览局域网私有市场并一键安装。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json"],
+  "engines": { "dsh": ">=0.2.2-rc.3 <0.3.0" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  }
+}

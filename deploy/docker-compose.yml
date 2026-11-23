@@ -1,0 +1,20 @@
+services:
+  market:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on: []
+    # 用宿主 uid 跑，否则写进挂载目录的文件会变成 root 所有，删不掉
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      PORT: 4874
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://dsh.internal}
+      PUBLIC_REGISTRY_URL: ${PUBLIC_REGISTRY_URL:-http://dsh.internal/registry}
+      DATA_DIR: /app/data
+      SITE_DIR: /app/site
+    volumes:
+      - ./data:/app/data
+      - ./site:/app/site
+    ports:
+      - "4874:4874"

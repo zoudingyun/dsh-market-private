@@ -1,0 +1,21 @@
+{
+  "name": "dsh-market",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DeepSeek Harness 局域网私有插件市场：网关 + 索引 + registry 适配器",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "cli": "node src/cli.mjs",
+    "index": "node src/cli.mjs index",
+    "test": "node --test --test-reporter=spec test/*.test.mjs"
+  },
+  "dependencies": {
+    "semver": "^7.7.1",
+    "tar": "^7.4.3",
+    "yaml": "^2.8.0"
+  }
+}

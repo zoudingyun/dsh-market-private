@@ -1,0 +1,5 @@
+# 市场标签页：Host 侧只占一行（无服务），真正的界面在 ./client
+- insert:
+    - id: dsh-market-tab
+      name: '@local/dsh-market-tab'
+      config: {}
