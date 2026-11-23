@@ -1,7 +1,12 @@
+# 服务端运行产物（锚定根目录，避免误伤 market-ui 下的同名目录）
+/data/
+/site/
 node_modules/
-data/
-site/
 .env
 *.log
 .DS_Store
 Thumbs.db
+
+# market-ui（fork）的构建产物由它自己的 .gitignore 管，这里只兜底
+/market-ui/lib/
+/market-ui/dist/
