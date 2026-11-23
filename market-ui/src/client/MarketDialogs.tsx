@@ -6,7 +6,7 @@ import { Button, Input, Modal, Toast, Tooltip } from '@deepseek-ai/dsh-client-ui
 import css from './Market.module.css'
 import { IconCheckOutline16, IconChevronUpOutline14, IconWarningOutline16 } from './icons.ts'
 import { SearchInput } from './SearchInput.tsx'
-import { installCommandFor, isInstalled, localizeBilingual, looksTerminal, pluginCategories, pluginName } from './market-data.ts'
+import { installCommandFor, isInstalled, localizeBilingual, looksTerminal, pluginCategories, pluginName, pluginTitle } from './market-data.ts'
 import { RecoveryPanel } from './RecoveryPanel.tsx'
 import { PinnedNote, SourceTag } from './SourceParts.tsx'
 import { CommentsModal } from './CommentsModal.tsx'
@@ -246,7 +246,7 @@ export function MarketDialogs({ c }: { c: MarketDialogsCtx }) {
           className={css.confirmModal}
           contentClassName={css.confirmContent}
           onClose={() => setConfirming(null)}
-          title={confirmingInstalled ? pluginName(confirming.name, confirming.npm) : t('confirmTitle') + ' ' + pluginName(confirming.name, confirming.npm) + '?'}
+          title={confirmingInstalled ? pluginTitle(confirming, uiLocale) : t('confirmTitle') + ' ' + pluginTitle(confirming, uiLocale) + '?'}
           footer={(
             <>
               {confirmingInstalled

@@ -33,6 +33,15 @@ export interface RegistryPlugin {
   /** One legacy category id or several category ids. */
   category: string | string[]
   description: Record<string, string>
+  /**
+   * Human title from the catalog (`{ zh, en }`, or a plain string).
+   *
+   * The public catalog has no such field — its titles ARE package names. A
+   * private market's packages are scoped (`@local/foo`), which reads as noise
+   * on a card, so the market sends the display name separately and the card
+   * prefers it. Identity, install and update all keep using `name`/`npm`.
+   */
+  title?: Record<string, string> | string
   npm?: string | null
   tarball?: string | null
   stars?: number | null

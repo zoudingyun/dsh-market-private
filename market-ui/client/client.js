@@ -4651,7 +4651,8 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 			"github.com"
 		]);
 		const MAX_SCREENSHOTS = 6;
-		function gateScreenshot(value, anyHost = false) {
+		function gateScreenshot(value, anyHost = false, options = {}) {
+			const allowVector = options.allowVector === true;
 			if (typeof value !== "string") return {
 				ok: false,
 				reason: "not a string"
@@ -4661,7 +4662,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 					ok: false,
 					reason: "blocked by your organization"
 				};
-				if (/\.svg$/iu.test(value.split(/[?#]/u)[0])) return {
+				if (!allowVector && /\.svg$/iu.test(value.split(/[?#]/u)[0])) return {
 					ok: false,
 					reason: "svg is not rendered"
 				};
@@ -4679,7 +4680,8 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 					reason: "not a parseable URL"
 				};
 			}
-			if (parsed.protocol !== "https:") return {
+			const plainHttpFromOwnCatalog = options.allowPlainHttp === true && anyHost && parsed.protocol === "http:";
+			if (parsed.protocol !== "https:" && !plainHttpFromOwnCatalog) return {
 				ok: false,
 				reason: "not https"
 			};
@@ -4687,7 +4689,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 				ok: false,
 				reason: `host not allowlisted (${parsed.hostname})`
 			};
-			if (/\.svg$/iu.test(parsed.pathname)) return {
+			if (!allowVector && /\.svg$/iu.test(parsed.pathname)) return {
 				ok: false,
 				reason: "svg is not rendered"
 			};
@@ -4707,7 +4709,11 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 		* raster-only, because an SVG tile is a document, not an image.
 		*/
 		function safeIcon(value, anyHost = false) {
-			return safeScreenshot(value, anyHost);
+			const gate = gateScreenshot(value, anyHost, {
+				allowVector: anyHost,
+				allowPlainHttp: anyHost
+			});
+			return gate.ok ? gate.src : null;
 		}
 		/** Whether a screenshot URL is on one of the public image hosts (the only ones a resizing service may be handed). */
 		function isPublicImageHost(url) {
@@ -5121,6 +5127,26 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 		* Not a substitute for the identity: every key, lookup and install still
 		* uses `name` unchanged.
 		*/
+		/**
+		* Card title: the catalog's own title when it has one, else the package name.
+		*
+		* `name` stays the identity everywhere else (install, updates, block lists,
+		* dedupe); this only decides what the reader sees.
+		*/
+		function pluginTitle(plugin, lang) {
+			const title = plugin.title;
+			if (typeof title === "string" && title.trim() !== "") return title.trim();
+			if (title !== null && typeof title === "object") {
+				const record = title;
+				const preferred = lang === void 0 ? void 0 : record[lang];
+				for (const candidate of [
+					preferred,
+					record.zh,
+					record.en
+				]) if (typeof candidate === "string" && candidate.trim() !== "") return candidate.trim();
+			}
+			return pluginName(plugin.name, plugin.npm);
+		}
 		function pluginName(name, npm) {
 			const hash = name.indexOf("#");
 			if (hash === -1) return name;
@@ -8348,6 +8374,15 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 				}
 			}, key);
 		}
+		/** Whether a tile/screenshot URL is a GitHub raw host (the only kind the proxies serve). */
+		function isGithubRawUrl(url) {
+			try {
+				const host = new URL(url).hostname.toLowerCase();
+				return host === "raw.githubusercontent.com" || host === "github.com" || host === "objects.githubusercontent.com";
+			} catch {
+				return false;
+			}
+		}
 		function OwnerAvatar({ name, owner, icon, className, trusted }) {
 			const [failed, setFailed] = (0, react.useState)(false);
 			const [routeIndex, setRouteIndex] = (0, react.useState)(0);
@@ -8356,7 +8391,10 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 			const av = className === void 0 ? Market_module_css_default.av : `${Market_module_css_default.av} ${className}`;
 			const tile = iconFailed ? null : safeIcon(icon, trusted === true);
 			if (tile !== null) {
-				const candidates = githubRouteCandidates("raw", tile);
+				const candidates = isGithubRawUrl(tile) ? githubRouteCandidates("raw", tile) : [{
+					url: tile,
+					proxy: null
+				}];
 				const candidate = candidates[Math.min(iconRouteIndex, candidates.length - 1)];
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
 					className: av,
@@ -17286,7 +17324,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 										target: "_blank",
 										rel: "noreferrer",
 										"aria-label": `${p.name} — ${t("repoLink")}`,
-										children: pluginName(p.name, p.npm)
+										children: pluginTitle(p, lang)
 									})
 								})
 							}),
@@ -17333,7 +17371,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 													className: Market_module_css_default.nmButton,
 													title: p.name,
 													onClick: () => setConfirming(p),
-													children: pluginName(p.name, p.npm)
+													children: pluginTitle(p, lang)
 												}),
 												linksToGithub(p) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
 													className: Market_module_css_default.repoMarkLink,
@@ -17509,7 +17547,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 												rel: "noreferrer",
 												title: p.name,
 												"aria-label": `${p.name} — ${t("repoLink")}`,
-												children: [pluginName(p.name, p.npm), linksToGithub(p) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GithubRepoMark, { className: Market_module_css_default.repoMark })]
+												children: [pluginTitle(p, lang), linksToGithub(p) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GithubRepoMark, { className: Market_module_css_default.repoMark })]
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												className: Market_module_css_default.byline,
@@ -23105,7 +23143,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 					className: Market_module_css_default.confirmModal,
 					contentClassName: Market_module_css_default.confirmContent,
 					onClose: () => setConfirming(null),
-					title: confirmingInstalled ? pluginName(confirming.name, confirming.npm) : t("confirmTitle") + " " + pluginName(confirming.name, confirming.npm) + "?",
+					title: confirmingInstalled ? pluginTitle(confirming, uiLocale) : t("confirmTitle") + " " + pluginTitle(confirming, uiLocale) + "?",
 					footer: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: confirmingInstalled ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
 						variant: "ghost",
 						onClick: () => setConfirming(null),

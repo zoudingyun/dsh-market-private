@@ -106,6 +106,7 @@ node src/cli.mjs yank    r_xxxx --as admin      # 下架（索引移除，包保
 |---|---|---|
 | GET | `/api/v1/index.json` | 索引，DSH **format 1**（原生发现页读这个） |
 | GET | `/api/v1/catalog.json` | 同一份数据的 **awesome 形状**，dsh-market 等第三方市场直接消费 |
+| GET | `/api/v1/plugins/:name/icon` | 插件图标（绝对地址）。catalog 里用它，base64 会被第三方市场的前端安全校验丢掉 |
 | GET | `/api/v1/market/info` | 匿名可读：`requiresAuth`，客户端据此决定是否强制登录 |
 | GET/POST | `/api/v1/sources`、`/api/v1/sources/refresh` | 透传外部源（官方 catalog 等）的状态与刷新 |
 | GET | `/p/:name` | 插件详情页（catalog 里没有仓库地址时作为落地页） |

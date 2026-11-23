@@ -14,6 +14,7 @@ import {
   matchInstalledName,
   pluginCategories,
   pluginName,
+  pluginTitle,
   type RegistryPlugin,
   themePlugins as themePluginsOf,
 } from './market-data.ts'
@@ -605,7 +606,7 @@ export function useMarketRender(c: MarketRenderIn) {
           <div className={css.recentName}>
             <Tooltip label={p.name} side="bottom" maxWidth={320} delayMs={HOVER_TIP_DELAY_MS}>
               <a className={`${css.nm} ${css.nmLink}`} href={p.url} target="_blank" rel="noreferrer" aria-label={`${p.name} — ${t('repoLink')}`}>
-                {pluginName(p.name, p.npm)}
+                {pluginTitle(p, lang)}
               </a>
             </Tooltip>
           </div>
@@ -647,7 +648,7 @@ export function useMarketRender(c: MarketRenderIn) {
                 the GitHub mark beside it is still the way to the source. */}
             <div className={`${css.nm} ${css.nmRow}`}>
               <button type="button" className={css.nmButton} title={p.name} onClick={() => setConfirming(p)}>
-                {pluginName(p.name, p.npm)}
+                {pluginTitle(p, lang)}
               </button>
               {linksToGithub(p) && (
                 <a className={css.repoMarkLink} href={p.url} target="_blank" rel="noreferrer" aria-label={`${p.name} — ${t('repoLink')}`} title={t('repoLink')}>
@@ -773,7 +774,7 @@ export function useMarketRender(c: MarketRenderIn) {
           <div className={css.themeCardHead}>
             <div className={css.themeIdentity}>
               <a className={`${css.nm} ${css.nmLink}`} href={p.url} target="_blank" rel="noreferrer" title={p.name} aria-label={`${p.name} — ${t('repoLink')}`}>
-                {pluginName(p.name, p.npm)}
+                {pluginTitle(p, lang)}
                 {linksToGithub(p) && <GithubRepoMark className={css.repoMark} />}
               </a>
               <div className={css.byline}>

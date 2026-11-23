@@ -58,6 +58,17 @@ export function GithubRoutedImg({ src, alt, className, key }: { src: string; alt
   )
 }
 
+
+/** Whether a tile/screenshot URL is a GitHub raw host (the only kind the proxies serve). */
+function isGithubRawUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'raw.githubusercontent.com' || host === 'github.com' || host === 'objects.githubusercontent.com'
+  } catch {
+    return false
+  }
+}
+
 export function OwnerAvatar({ name, owner, icon, className, trusted }: { name: string; owner: string; icon?: string | null; className?: string; trusted?: boolean }) {
   const [failed, setFailed] = useState(false)
   const [routeIndex, setRouteIndex] = useState(0)
@@ -71,7 +82,11 @@ export function OwnerAvatar({ name, owner, icon, className, trusted }: { name: s
     // of a direct connection: on networks where raw is unreachable the icon
     // would fail on first request and silently degrade to the owner's avatar
     // (#1078). Candidates are walked on error, like the avatar branch below.
-    const candidates = githubRouteCandidates('raw', tile)
+    // 只有 GitHub raw 的地址才需要走加速候选。私有市场自带的图标是内网
+    // 绝对地址，塞进 ghfast.top 之类的代理既会失败、也把内网地址泄给第三方。
+    const candidates = isGithubRawUrl(tile)
+      ? githubRouteCandidates('raw', tile)
+      : [{ url: tile, proxy: null as string | null }]
     const candidate = candidates[Math.min(iconRouteIndex, candidates.length - 1)]!
     return (
       <img

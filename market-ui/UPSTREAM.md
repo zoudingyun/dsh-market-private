@@ -20,6 +20,16 @@
 | P2 | **登录**：账号密码换 token，存进 profile 的 `market state`（`accounts`，按 origin），目录请求自动注入 `Authorization` | `src/accounts.ts`、`src/hot.ts`、`src/catalogs.ts`、`src/client/MarketLoginDialog.tsx` | ✅ 真机验证 |
 | P3 | **发布本机插件**：列已装组合包 → `npm pack`（含 `link:` 解析）→ `POST /api/v1/releases` | `src/publish.ts`、`src/routes.ts`、`src/client/PublishPanel.tsx`（已安装页底部） | ✅ 真机验证 |
 
+### 私有市场的显示名与图标（2026-11-23 晚）
+
+上游的卡片标题就是条目里的 `name`（公共目录的包名本身就是可读的）。私有市场的包名是 `@local/xxx`，直接显示是噪音。三处改动：
+
+1. **服务端 `catalog.json` 额外带 `title`（`{zh,en}`）和绝对地址的 `icon`**（新接口 `/api/v1/plugins/:name/icon`）。上游不认这些字段也不会出错。
+2. **客户端标题优先取 `title`**：`pluginTitle(plugin, lang)`，`name`/`npm` 继续负责身份、安装、更新、屏蔽——只改显示。
+3. **两条上游假设让内网图标显示不出来**，按「用户自己添加的目录」范围放开：
+   - `safeIcon` 只接受 https 且拒绝 SVG → 自有目录允许 http + SVG（`<img>` 里的 SVG 不能执行脚本；README 截图仍是 https + 栅格）；
+   - 图标一律走 `githubRouteCandidates('raw')` 加速代理 → 只有 GitHub raw 域名才走代理，内网地址直连（否则会拼成 `https://ghfast.top/http://内网/...`）。
+
 ### 与上游行为的差异（刻意为之）
 
 1. **`UserCatalog` 仍然只有 `{id, url, file}`** —— token 不进目录配置，按 origin 存在市场状态里。这样删目录不会顺手丢凭据，凭据也不会跟着备份里的目录一起被复制出去。

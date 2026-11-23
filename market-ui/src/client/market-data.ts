@@ -49,6 +49,8 @@ export interface RegistryPlugin {
   /** One legacy category id or several category ids. */
   category: string | string[]
   description?: LocalizedText
+  /** Display title from a private catalog (`{ zh, en }` or a string); the public one has none. */
+  title?: LocalizedText | string
   stars?: number | null
   starsCheckedAt?: string | null
   /** Lifetime downloads of every public Release asset, not installations or users. */
@@ -1503,21 +1505,26 @@ export interface ScreenshotRejection {
 /** The single acceptance rule: the URL to load, or the sentence explaining the refusal. */
 type ScreenshotGate = { ok: true; src: string } | { ok: false; reason: string }
 
-function gateScreenshot(value: unknown, anyHost = false): ScreenshotGate {
+function gateScreenshot(value: unknown, anyHost = false, options: { allowVector?: boolean; allowPlainHttp?: boolean } = {}): ScreenshotGate {
+  const allowVector = options.allowVector === true
   if (typeof value !== 'string') return { ok: false, reason: 'not a string' }
   // An organization that forbids outside images: only the page's own origin.
   if (!orgPolicy().externalImages) {
     if (!imageAllowed(value)) return { ok: false, reason: 'blocked by your organization' }
-    if (/\.svg$/iu.test(value.split(/[?#]/u)[0]!)) return { ok: false, reason: 'svg is not rendered' }
+    if (!allowVector && /\.svg$/iu.test(value.split(/[?#]/u)[0]!)) return { ok: false, reason: 'svg is not rendered' }
     return { ok: true, src: value }
   }
   let parsed: URL
   try { parsed = new URL(value) } catch { return { ok: false, reason: 'not a parseable URL' } }
-  if (parsed.protocol !== 'https:') return { ok: false, reason: 'not https' }
+  // An entry from a catalog the user added themselves may live on a plain-HTTP
+  // intranet host. Public catalog entries still have to be https: the allowlist
+  // below is the only reason a stranger's URL is fetched at all.
+  const plainHttpFromOwnCatalog = options.allowPlainHttp === true && anyHost && parsed.protocol === 'http:'
+  if (parsed.protocol !== 'https:' && !plainHttpFromOwnCatalog) return { ok: false, reason: 'not https' }
   // An entry from an added catalog may show images from its own hosts: the
   // catalog is the organization's (or the user's) own choice, not README text.
   if (!anyHost && !SCREENSHOT_HOSTS.has(parsed.hostname)) return { ok: false, reason: `host not allowlisted (${parsed.hostname})` }
-  if (/\.svg$/iu.test(parsed.pathname)) return { ok: false, reason: 'svg is not rendered' }
+  if (!allowVector && /\.svg$/iu.test(parsed.pathname)) return { ok: false, reason: 'svg is not rendered' }
   return { ok: true, src: value }
 }
 
@@ -1533,7 +1540,13 @@ function safeScreenshot(value: unknown, anyHost = false): string | null {
  * raster-only, because an SVG tile is a document, not an image.
  */
 export function safeIcon(value: unknown, anyHost = false): string | null {
-  return safeScreenshot(value, anyHost)
+  // Icons additionally accept SVG, but only for an added catalog (`anyHost`):
+  // an SVG in an <img> cannot run scripts, and a private market's own tile is
+  // a logo rather than a document. README screenshots keep the raster-only rule.
+  // Plain-HTTP intranet hosts and SVG tiles are allowed for an added catalog
+  // only — never for public entries or README screenshots.
+  const gate = gateScreenshot(value, anyHost, { allowVector: anyHost, allowPlainHttp: anyHost })
+  return gate.ok ? gate.src : null
 }
 
 /** Whether a screenshot URL is on one of the public image hosts (the only ones a resizing service may be handed). */
@@ -2015,6 +2028,28 @@ export function localizeBilingualList(parts: string[], lang: 'zh' | 'en'): strin
  * Not a substitute for the identity: every key, lookup and install still
  * uses `name` unchanged.
  */
+/**
+ * Card title: the catalog's own title when it has one, else the package name.
+ *
+ * `name` stays the identity everywhere else (install, updates, block lists,
+ * dedupe); this only decides what the reader sees.
+ */
+export function pluginTitle(
+  plugin: Pick<RegistryPlugin, 'name' | 'npm' | 'title'>,
+  lang?: string,
+): string {
+  const title = plugin.title
+  if (typeof title === 'string' && title.trim() !== '') return title.trim()
+  if (title !== null && typeof title === 'object') {
+    const record = title as Record<string, unknown>
+    const preferred = lang === undefined ? undefined : record[lang]
+    for (const candidate of [preferred, record.zh, record.en]) {
+      if (typeof candidate === 'string' && candidate.trim() !== '') return candidate.trim()
+    }
+  }
+  return pluginName(plugin.name, plugin.npm)
+}
+
 export function pluginName(name: string, npm?: string | null): string {
   const hash = name.indexOf('#')
   if (hash === -1) return name

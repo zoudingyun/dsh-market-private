@@ -32,11 +32,6 @@ function fresh() {
   }
 }
 
-const absIcon = (icon) => {
-  if (!icon) return null;
-  if (/^(data:|https?:\/\/)/.test(icon)) return icon;
-  return `${config.publicBaseUrl}/api/v1/${icon.replace(/^\/+/, '')}`;
-};
 
 /** format 1：硬断言，绝不返回 DSH 会拒绝的文档 */
 export function renderFormat1() {
@@ -60,12 +55,17 @@ export function renderCatalog() {
     return {
       name: p.name,
       owner,
+      // 人类可读的名字：dsh-market 的卡片标题只认 `name`（包名），中英标题靠
+      // 这个字段带给客户端（fork 已改渲染优先取它）。上游不认也不会出错。
+      ...(p.title ? { title: p.title } : {}),
       // dsh-market 要求 url 是 http(s)：优先仓库地址，没有就给市场详情页
       url: repo ?? `${config.publicBaseUrl}/p/${encodeURIComponent(p.name)}`,
       category: [p.metadata?.category ?? 'general'],
       description: p.description ?? { zh: '', en: '' },
       npm: p.name,
-      ...(p.icon ? { icon: absIcon(p.icon) } : {}),
+      // 图标统一走接口的绝对地址：base64 data URL 会被客户端的安全校验丢掉，
+      // 而相对路径只有本市场自己的索引能用。
+      ...(p.icon ? { icon: `${config.publicBaseUrl}/api/v1/plugins/${encodeURIComponent(p.name)}/icon` } : {}),
       ...(p.homepage ? { homepage: p.homepage } : {}),
       keywords: p.metadata?.keywords ?? [],
       versions: p.versions.map((v) => v.version),

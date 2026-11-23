@@ -374,6 +374,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---------- 改插件归属（分类/标签）----------
+    // ---------- 插件图标（catalog 用绝对地址；base64 会被前端安全校验丢掉） ----------
+    const iconMatch = /^\/api\/v1\/plugins\/(.+)\/icon$/.exec(p);
+    if (iconMatch !== null && req.method === 'GET') {
+      const name = decodeURIComponent(iconMatch[1]);
+      const row = q.get(
+        `SELECT r.icon_path, r.version FROM releases r JOIN plugins pl ON pl.id = r.plugin_id
+          WHERE pl.name = ? AND r.status = 'published' AND r.icon_path IS NOT NULL
+          ORDER BY r.published_at DESC LIMIT 1`,
+        name,
+      );
+      if (row === undefined || !fs.existsSync(row.icon_path)) return send(res, 404, { error: 'no icon' });
+      const ext = path.extname(row.icon_path).toLowerCase();
+      const mime = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[ext] ?? 'application/octet-stream';
+      res.writeHead(200, {
+        'content-type': mime,
+        'cache-control': 'public, max-age=300',
+        etag: `"${row.version}${ext}"`,
+        ...CORS,
+      });
+      return res.end(fs.readFileSync(row.icon_path));
+    }
+
+    // 必须排在下面那个 `(.+)` 的详情路由之前：它会把这个路径整段当成包名。
     const pluginMatch = /^\/api\/v1\/plugins\/(.+)$/.exec(p);
     if (pluginMatch && req.method === 'GET') {
       const one = getPlugin(decodeURIComponent(pluginMatch[1]));
