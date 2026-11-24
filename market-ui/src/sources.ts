@@ -496,10 +496,19 @@ export function pinnedAllowBuildsKeys(name: string, spec: string, sha: string): 
  * full-repo downloads and local build scripts.
  * @returns the target spec, or null when the source url is unsupported.
  */
-export function installTargetFor(entry: { url: string; npm?: unknown; tarball?: unknown; source?: unknown; git?: unknown; offlineTarball?: unknown }): string | null {
+export function installTargetFor(entry: { url: string; npm?: unknown; tarball?: unknown; registryTarball?: unknown; source?: unknown; git?: unknown; offlineTarball?: unknown }): string | null {
   // An entry from an offline bundle installs from the package file that came
   // with it. The path was resolved and checked when the catalog was read.
   if (entry.source !== undefined && typeof entry.offlineTarball === 'string' && entry.offlineTarball !== '') return `file:${entry.offlineTarball}`
+  // A private market that serves its own package files says so (`registryTarball`):
+  // install the file, not the name. A name only works when the client's npm
+  // registry happens to be that market — otherwise pnpm asks the public mirror,
+  // which does not have a private version, and the whole install fails naming a
+  // package the user never asked for. A URL needs no registry at all.
+  // Other catalogs keep their old behaviour: their `tarball` is a GitHub
+  // release asset with different update semantics.
+  if (entry.registryTarball === true && entry.source !== undefined
+    && typeof entry.tarball === 'string' && /^https?:\/\//iu.test(entry.tarball)) return entry.tarball
   const hasNpm = typeof entry.npm === 'string' && NPM_NAME_RE.test(entry.npm)
   if (entry.source !== undefined && !hasNpm && typeof entry.git === 'string' && /^git\+(?:https?|ssh):\/\//u.test(entry.git)) return entry.git
   const source = parseSourceUrl(entry.url)

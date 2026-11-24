@@ -44,6 +44,8 @@ export interface RegistryPlugin {
   url: string
   npm?: string | null
   tarball?: string | null
+  /** Set by a market that serves its own package files: install `tarball`, not the npm name. */
+  registryTarball?: boolean
   /** Server-provided revision of this GitHub-only entry's compatibility source. */
   compatibilityRevision?: string
   /** One legacy category id or several category ids. */

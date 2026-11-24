@@ -543,3 +543,27 @@ describe('internal repository entries', () => {
     expect(installTargetFor({ ...entry, git: 'file:///etc', source: { id: 'acme' } })).toBeNull()
   })
 })
+
+/**
+ * A market that serves its own package files must install by URL.
+ *
+ * The failure this prevents is ugly and confusing: the client's npm registry
+ * is the public mirror, the private version does not exist there, and pnpm
+ * fails the WHOLE install while naming that package — so the user, who clicked
+ * install on something else entirely, is told a package they never asked for
+ * cannot be found.
+ */
+describe('安装目标：私有市场声明的包文件优先于包名', () => {
+  it('三条同时成立才改道，其余保持原样', () => {
+  const base = { url: 'http://market.internal:4874/p/acme-badge', name: 'acme-badge', npm: 'acme-badge' }
+  const tarball = 'http://market.internal:4874/registry/acme-badge/-/acme-badge-1.2.3.tgz'
+  // 只有「来自用户添加的目录 + 显式声明 registryTarball + http(s) 地址」三条同时成立才改道
+    expect(installTargetFor({ ...base, tarball, registryTarball: true, source: { id: 'acme' } })).toBe(tarball)
+  // 没有 source（公共目录条目）时不动：那是别家的目录，语义不同
+    expect(installTargetFor({ ...base, tarball, registryTarball: true })).toBeNull()
+  // 没有声明就不动：GitHub release 资产也是 tarball，但一直按包名装
+    expect(installTargetFor({ ...base, tarball, source: { id: 'acme' } })).toBe('acme-badge')
+  // 非 http(s) 的 tarball 不当安装目标（离线包走 offlineTarball）
+    expect(installTargetFor({ ...base, tarball: './x.tgz', registryTarball: true, source: { id: 'acme' } })).toBe('acme-badge')
+  })
+})

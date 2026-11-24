@@ -44,6 +44,8 @@ export interface RegistryPlugin {
   title?: Record<string, string> | string
   npm?: string | null
   tarball?: string | null
+  /** Set by a market that serves its own package files: install `tarball`, not the npm name. */
+  registryTarball?: boolean
   stars?: number | null
   starsCheckedAt?: string | null
   /** All public Release assets in this repository, lifetime count; never npm's window. */

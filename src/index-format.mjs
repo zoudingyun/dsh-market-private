@@ -63,6 +63,13 @@ export function renderCatalog() {
       category: [p.metadata?.category ?? 'general'],
       description: p.description ?? { zh: '', en: '' },
       npm: p.name,
+      /**
+       * 包文件的绝对地址。装了本市场的 fork 会优先用它安装（见 `installTargetFor`）：
+       * 用包名安装要先去问 registry，而内网客户端默认问的是公网镜像——私有版本
+       * 在那里不存在，于是「装 A 却报 B 找不到」。给地址就绕开了整个 registry 解析。
+       */
+      registryTarball: true,
+      tarball: `${config.publicRegistryUrl}/${p.name}/-/${p.name.startsWith('@') ? p.name.split('/')[1] : p.name}-${p.versions[0].version}.tgz`,
       // 图标统一走接口的绝对地址：base64 data URL 会被客户端的安全校验丢掉，
       // 而相对路径只有本市场自己的索引能用。
       ...(p.icon ? { icon: `${config.publicBaseUrl}/api/v1/plugins/${encodeURIComponent(p.name)}/icon` } : {}),

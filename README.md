@@ -136,6 +136,15 @@ node src/cli.mjs yank    r_xxxx --as admin      # 下架（索引移除，包保
 
 ---
 
+## 私有插件怎么装（零配置）
+
+`catalog.json` 里每个条目都带 `tarball`（包文件绝对地址）和 `registryTarball: true`。fork 的 `installTargetFor()` 看到这两个字段就**按地址安装**，不去问 registry：
+
+- 用**包名**装，客户端必须查它自己的 npm 源；内网客户端默认查公网镜像，私有版本在那里不存在 → 整条安装失败，报错还指向一个用户没点过的包；
+- 用**地址**装，pnpm 直接取文件，不涉及任何 registry 解析。装完 `package.json` 里记的是 `http://<market>/registry/<name>/-/<name>-<ver>.tgz`，以后 `pnpm install` 也不用配源。
+
+实测：一个**没有任何 `.npmrc`** 的 profile 里安装私有插件成功（热加载生效），依赖被写成包文件地址，「已安装」识别正常。
+
 ## 两种 JSON 投影
 
 同一份数据、两个格式，靠请求时的动态渲染产出（带 ETag，未变更返回 304）：

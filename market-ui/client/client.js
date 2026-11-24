@@ -3756,6 +3756,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
 		*/
 		function installTargetFor(entry) {
 			if (entry.source !== void 0 && typeof entry.offlineTarball === "string" && entry.offlineTarball !== "") return `file:${entry.offlineTarball}`;
+			if (entry.registryTarball === true && entry.source !== void 0 && typeof entry.tarball === "string" && /^https?:\/\//iu.test(entry.tarball)) return entry.tarball;
 			const hasNpm = typeof entry.npm === "string" && NPM_NAME_RE.test(entry.npm);
 			if (entry.source !== void 0 && !hasNpm && typeof entry.git === "string" && /^git\+(?:https?|ssh):\/\//u.test(entry.git)) return entry.git;
 			const source = parseSourceUrl(entry.url);
