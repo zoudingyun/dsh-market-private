@@ -229,6 +229,8 @@ curl -XPOST -H "authorization: Bearer <token>" -H 'content-type: application/oct
      --data-binary @dist/dshmarket-1.90.0.tgz "http://<host>:4874/api/v1/releases?category=general"
 ```
 
+**`dist/` 不入库**（`.gitignore`）：每份 6.5 MB，且完全可由 `market-ui` 源码重建。新克隆的仓库里 `market-ui/lib/` 也不存在（构建产物），脚本会自己跑一次构建再打包，所以只要 `market-ui` 装过依赖就能直接用。
+
 打包时改了三处，都是市场硬性要求：去掉 `scripts.prepare`（禁止安装脚本）、补 `engines.dsh`、带上 `icon.svg`。
 **包名必须保持 `dshmarket`**——浏览器端 bundle 的模块 id 是编译期写死的（`market-ui/tsdown.config.ts` 的 `const id`），改名会让客户端半边静默不挂载（宿主半边却照常起来，很难查）。用版本号区分自己的线（`1.90.x`）。
 

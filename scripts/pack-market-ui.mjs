@@ -47,17 +47,22 @@ if (name !== 'dshmarket') {
 }
 const outDir = path.resolve(arg('out', path.join(repo, 'dist')));
 
-if (!fs.existsSync(path.join(source, 'lib')) || !fs.existsSync(path.join(source, 'client', 'client.js'))) {
-  console.error('market-ui 还没构建：先跑 `cd market-ui && npm install && npm run build`');
-  process.exit(2);
-}
-
+// 先构建、再检查：`lib/` 是构建产物，不入库，所以新克隆的仓库里它本来就不存在。
+// 顺序反过来会让「本可以自动构建」的情况直接报错退出（原来就是这个 bug）。
 if (!has('no-build')) {
   console.log('→ 构建 market-ui');
   const built = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {
     cwd: source, stdio: 'inherit', shell: process.platform === 'win32',
   });
-  if (built.status !== 0) process.exit(built.status ?? 1);
+  if (built.status !== 0) {
+    console.error('market-ui 构建失败：先在 market-ui 里跑 `npm install`');
+    process.exit(built.status ?? 1);
+  }
+}
+
+if (!fs.existsSync(path.join(source, 'lib')) || !fs.existsSync(path.join(source, 'client', 'client.js'))) {
+  console.error('market-ui 缺少构建产物（lib/ 或 client/client.js）：去掉 --no-build 让脚本自己构建');
+  process.exit(2);
 }
 
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'dshm-pack-'));
